@@ -1,0 +1,13 @@
+# pnpm 12.x cambió dónde se declaran los scripts de compilación permitidos:
+# antes era el campo "pnpm" en package.json, ahora va aquí.
+#
+# - esbuild: lo necesita el transpilador de drizzle-kit / tsx.
+# - unrs-resolver: lo usa eslint-config-next (ESLint). Sin esto, `pnpm install`
+#   aborta con ERR_PNPM_IGNORED_BUILDS.
+allowBuilds:
+  esbuild: true
+  unrs-resolver: true
+
+onlyBuiltDependencies:
+  - esbuild
+  - unrs-resolver

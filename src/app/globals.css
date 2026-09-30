@@ -1,0 +1,164 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #f1f5f9;
+  --foreground: #0f172a;
+  --estad-navy: #0f2d52;
+  --estad-blue: #0f3a6b;
+  --estad-orange: #e86a17;
+  --nav-bg: #0f2d52;
+  --nav-border: #0a2040;
+  --hero-from: #0f2d52;
+  --hero-via: #14477f;
+  --link: #0f3a6b;
+  --link-hover: #082040;
+  --btn-primary-bg: #0f3a6b;
+  --btn-primary-hover: #14477f;
+}
+
+html.dark {
+  --background: #020617;
+  --foreground: #e2e8f0;
+  --link: #7fa8e0;
+  --link-hover: #b7c6dd;
+}
+
+html,
+body {
+  overflow-x: hidden;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+  height: auto;
+}
+
+body {
+  width: 100%;
+}
+
+/* Prevenir zoom automático en móvil al enfocar formularios (mínimo 16px) */
+@media (max-width: 639px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* Áreas táctiles mínimas en móvil */
+@media (max-width: 639px) {
+  a,
+  button {
+    min-height: 44px;
+  }
+}
+
+/* Paletas formales - override variables */
+html[data-palette="dis1"] {
+  --nav-bg: #0f2d52;
+  --nav-border: #0a2040;
+  --hero-from: #0f2d52;
+  --hero-via: #14477f;
+  --estad-navy: #0f2d52;
+  --estad-blue: #0f3a6b;
+  --estad-orange: #e86a17;
+}
+html[data-palette="dis2"] {
+  --nav-bg: #1a2332;
+  --nav-border: #0f1a2a;
+  --hero-from: #1a2332;
+  --hero-via: #2a3a52;
+  --estad-navy: #1a2332;
+  --estad-blue: #2a3a52;
+  --estad-orange: #b45309;
+  --btn-primary-bg: #1a2332;
+  --btn-primary-hover: #2a3a52;
+  --link: #1a365d;
+  --link-hover: #0f2240;
+}
+html[data-palette="dis3"] {
+  --nav-bg: #112e2e;
+  --nav-border: #0a1f1f;
+  --hero-from: #112e2e;
+  --hero-via: #1d4d4d;
+  --estad-navy: #112e2e;
+  --estad-blue: #1d4d4d;
+  --estad-orange: #9a6b2a;
+  --btn-primary-bg: #112e2e;
+  --btn-primary-hover: #184040;
+  --link: #14332e;
+  --link-hover: #0a1f1f;
+}
+html[data-palette="noche2"] {
+  --nav-bg: #0d1321;
+  --nav-border: #1c2540;
+  --hero-from: #0d1321;
+  --hero-via: #1c2540;
+  --estad-navy: #1c2540;
+  --estad-blue: #2a3a5c;
+  --estad-orange: #c0842a;
+}
+html[data-palette="noche3"] {
+  --nav-bg: #0f172a;
+  --nav-border: #1e293b;
+  --hero-from: #0f172a;
+  --hero-via: #1e3a5a;
+  --estad-navy: #0f172a;
+  --estad-blue: #1e3a5a;
+  --estad-orange: #a16207;
+}
+
+/* Aplicar variables a elementos clave (sobrescribe bg hardcodeados) */
+html[data-palette="dis2"] nav,
+html[data-palette="dis3"] nav,
+html[data-palette="noche2"] nav,
+html[data-palette="noche3"] nav {
+  background-color: var(--nav-bg) !important;
+  border-color: var(--nav-border) !important;
+}
+
+/* Hovers y links con mayor contraste - sin chocar KPIs */
+a {
+  transition: color 150ms, background-color 150ms, opacity 150ms;
+}
+a:hover {
+  color: var(--link-hover);
+}
+nav a:hover, footer a:hover {
+  color: #fff !important;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* botones formales contraste */
+button, a.inline-flex {
+  transition: all 150ms ease;
+}
+button:hover, a.inline-flex:hover {
+  filter: brightness(1.08);
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+}
+
+@media print {
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+  header, footer, button, input, select {
+    box-shadow: none !important;
+  }
+}
