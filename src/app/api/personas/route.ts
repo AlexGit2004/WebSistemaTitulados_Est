@@ -52,6 +52,20 @@ export async function GET(req: NextRequest) {
       if (!rows.length)
         return NextResponse.json({ error: "No se encontró el registro" }, { status: 404 });
 
+      // Un registro dado de baja sigue siendo legible (el histórico de acreditación lo
+      // necesita), pero el titular no puede iniciar sesión ni editarlo: el código 403
+      // con `activo: false` es lo que permite al frontend explicar el bloqueo en vez de
+      // mostrar un formulario vacío.
+      if (!rows[0]!.activo) {
+        const sesion = await leerSesionDeRequest(req);
+        if (sesion?.rol !== "admin") {
+          return NextResponse.json(
+            { error: "Su registro se encuentra dado de baja. Contacte a la Carrera.", activo: false },
+            { status: 403 }
+          );
+        }
+      }
+
       return NextResponse.json(rows[0]);
     }
 
@@ -60,6 +74,12 @@ export async function GET(req: NextRequest) {
     if (denegado) return denegado;
 
     const conds: SQL[] = [];
+
+    // Baja lógica (decisión D3): los registros dados de baja no aparecen en el listado.
+    // Se filtran por defecto y solo se incluyen con `?incluirBajas=true`, que es lo que
+    // usa la vista de auditoría para ver el histórico.
+    const incluirBajas = sp.get("incluirBajas") === "true";
+    if (!incluirBajas) conds.push(eq(personas.activo, true), eq(personas.estadoRegistro, "VALIDADO"));
 
     const tipo = sp.get("tipo");
     if (tipo === "TITULADO" || tipo === "EGRESADO") conds.push(eq(personas.tipo, tipo));
@@ -118,7 +138,8 @@ export async function GET(req: NextRequest) {
       .limit(perPage)
       .offset((pagina - 1) * perPage);
 
-    // Totales por tipo, para las pestañas del panel.
+    // Totales por tipo, para las pestañas del panel. Cuentan los mismos registros que
+    // el listado: si no, las pestañas mostrarían un total que la tabla no tiene.
     const resumen = await db
       .select({
         tipo: personas.tipo,
@@ -126,6 +147,7 @@ export async function GET(req: NextRequest) {
         empleados: sql<number>`count(*) filter (where ${personas.estadoLaboral} in ('EMPLEADO','INDEPENDIENTE'))::int`,
       })
       .from(personas)
+      .where(conds.length ? and(...conds) : undefined)
       .groupBy(personas.tipo);
 
     return NextResponse.json({

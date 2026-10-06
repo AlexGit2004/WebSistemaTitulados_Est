@@ -49,7 +49,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const res = await fetch("/api/auth/sesion", { cache: "no-store" });
       const data = await res.json();
-      setUser(data?.user ?? null);
+
+      // El endpoint devuelve `autenticado` + los datos planos (decisión D1), no un objeto
+      // `user`. Antes se leía `data.user`, que venía `undefined` en toda respuesta y dejaba
+      // al usuario con la sesión aparenta cerrada en toda la aplicación.
+      if (res.ok && data?.autenticado) {
+        setUser({
+          rol: data.rol,
+          ci: data.ci,
+          nombre: data.nombre ?? "",
+          correo: data.correo ?? null,
+          id: data.id ?? null,
+        });
+      } else {
+        setUser(null);
+      }
     } catch {
       setUser(null);
     } finally {
@@ -59,7 +73,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
-      await fetch("/api/auth/logout", { method: "DELETE" });
+      // `POST /api/auth/sesion` es el cierre de sesión: revoca la fila en `sesiones`,
+      // borra la cookie y deja el evento anotado en `audit_log`. Antes se llamaba a
+      // `DELETE /api/auth/logout`, una ruta que NO existía, así que la cookie sobrevivia
+      // al cierre y la persona quedaba conectada.
+      await fetch("/api/auth/sesion", { method: "POST", cache: "no-store" });
+    } catch {
+      // Aunque el servidor falle, el estado local se limpia: la UI no debe seguir
+      // mostrando un menú de administrador a alguien que pidió salir.
     } finally {
       setUser(null);
     }

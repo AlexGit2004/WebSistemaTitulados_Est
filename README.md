@@ -37,7 +37,7 @@ pnpm install
 cp .env.example .env.local      # en Windows:  copy .env.example .env.local
 #    Luego editar .env.local con sus datos de PostgreSQL
 
-# 3. Crear la base de datos (ver sección 3, es importante la collation)
+# 3. Crear la base de datos (ver sección 3)
 
 # 4. Aplicar el esquema (crea 4 tablas, 11 índices y 12 tipos ENUM)
 pnpm db:migrate
@@ -48,9 +48,15 @@ pnpm seed
 # 6. Arrancar
 pnpm dev        # desarrollo, http://localhost:3000
 
-# 7. Cargar 10 000 datos prueba
+# 7. Cargar los 300 datos de prueba
 pnpm seed:masivo
 ```
+
+> **`.env.local` es la única fuente de verdad.** Todos los comandos (`pnpm dev`, `pnpm db:*`,
+> `pnpm seed*`) leen `DATABASE_URL` de ahí. Si ese archivo no existe o le falta la variable,
+> los scripts fallan con un error explícito en vez de conectarse calladamente a otra base.
+> Para cambiar de base, editá solo `.env.local` — el nombre de la base no está hardcodeado en
+> ningún lado.
 
 ### Datos de prueba opcionales
 
@@ -58,7 +64,7 @@ Para levantar un volumen grande y probar el rendimiento de los indicadores:
 
 ```bash
 #el csv ya esta para ejecutar directamente pnpm seed:masivo
-pnpm generar:datos                  # genera datos_prueba.csv con 10.000 personas (Python)
+pnpm generar:datos                  # genera datos_prueba.csv: 290 personas (135 titulados, 155 egresados)
 
 pnpm seed:masivo                    # las carga en la base (por lotes)
 ```
@@ -80,7 +86,58 @@ pnpm seed -- --reset  # borra y recarga los datos mínimos (solo desarrollo)
 
 ---
 
-## 3. `SESSION_SECRET` — el secreto de la sesión
+## 3. Crear la base de datos
+
+Este paso **no lo hace** `pnpm db:migrate`: las migraciones de Drizzle crean las tablas, pero la
+base de datos como tal hay que crearla a mano una sola vez.
+
+### 3.1 Crear la base
+
+La base se crea con el superusuario `postgres` como owner:
+
+```bash
+sudo -u postgres createdb sistitulados_db
+```
+
+O entrando al `psql`:
+
+```bash
+sudo -u postgres psql
+```
+
+```sql
+CREATE DATABASE sistitulados_db;
+```
+
+### 3.2 Verificar
+
+```bash
+sudo -u postgres psql -l
+```
+
+Tiene que aparecer `sistitulados_db` en la lista.
+
+### 3.3 Conectar la aplicación
+
+`pnpm db:migrate` y `pnpm seed` leen la conexión de `DATABASE_URL` en `.env.local`, así que ahí
+va el nombre y la clave del superusuario:
+
+```dotenv
+DATABASE_URL=postgresql://postgres:TU_CLAVE@localhost:5432/sistitulados_db
+```
+
+Comprobación rápida:
+
+```bash
+psql -U postgres -d sistitulados_db -c "select 1;"
+```
+
+Si responde una fila, la conexión funciona y ya podés seguir con `pnpm db:migrate` y `pnpm seed`
+(sección 2, pasos 4 y 5).
+
+---
+
+## 4. `SESSION_SECRET` — el secreto de la sesión
 
 ### Qué es
 
@@ -137,7 +194,7 @@ echo "SESSION_SECRET=$(openssl rand -base64 48)" | sudo tee -a /etc/seguit/secre
 
 ---
 
-## 4. Estructura del proyecto
+## 5. Estructura del proyecto
 
 ```
 sistema1_5/
@@ -147,7 +204,7 @@ sistema1_5/
 ├── scripts/
 │   ├── seed.ts                  Datos mínimos: admin + noticias + 10 ejemplos
 │   └── seed_masivo.ts           Carga por lotes desde CSV
-├── scripts_generar_seed.py      Generador de 10.000 personas (Python)
+├── scripts_generar_seed.py      Generador de 290 personas (135 titulados, 155 egresados)
 ├── src/
 │   ├── app/
 │   │   ├── api/
@@ -176,6 +233,7 @@ sistema1_5/
 │   │   └── login/              Inicio de sesión
 │   ├── components/              Navbar, PublicDashboard, KpiNavigation, LoadingOverlay
 │   ├── db/                      schema.ts (tablas) e index.ts (conexión)
+│   │   └── env.ts               Carga .env.local antes de armar el Pool
 │   ├── lib/
 │   │   ├── sesion.ts            Cookie firmada (crear/verificar token)
 │   │   ├── password.ts          Hash y verificación de contraseñas (scrypt)
@@ -195,7 +253,7 @@ sistema1_5/
 
 ---
 
-## 5. Usuarios y acceso
+## 6. Usuarios y acceso
 
 ### El administrador
 
@@ -203,8 +261,8 @@ Lo crea `pnpm seed`:
 
 | Campo | Valor |
 |---|---|
-| Correo | `admin@umsa.bo` |
-| Contraseña | `admin123` |
+| Correo | `adm@gen.bo` |
+| Contraseña | `adm` |
 | Rol | `admin` |
 
 > **Cámbiala antes de entregar el sistema.** Entrá a *Usuarios* → ícono de llave → *Cambiar
@@ -225,7 +283,7 @@ Ejemplos que trae el `seed`:
 
 ---
 
-## 6. Seguridad: qué hace el sistema y qué no
+## 7. Seguridad: qué hace el sistema y qué no
 
 ### Lo que sí hace
 
@@ -238,26 +296,39 @@ Ejemplos que trae el `seed`:
 | **Rutas protegidas en el servidor** antes de renderizar | `src/middleware.ts` |
 | **Todas las APIs verifican sesión y rol**, no solo la UI | `src/lib/guards.ts` |
 | Cédula única e irrepetible, con alerta clara | `src/lib/validaciones.ts` |
+| **Límite de intentos en el login**: 5 por 15 min, con bloqueo de 15 min | `src/lib/rateLimit.ts` |
+| El limitador cuenta **por IP y por cédula**, así que atacar una cuenta desde varias IP también agota el contador | `src/lib/rateLimit.ts` |
+| **Alta pública con verificación por token** (hash SHA-256, 48 h de vigencia, 5 intentos, un solo uso) | `src/lib/verificacion.ts` |
+| El alta pública **no revela si una cédula ya existe** (responde 202 en ambos casos) | `src/app/api/registro/route.ts` |
 | Validación de entrada con **zod** en todas las escrituras | `src/lib/validaciones.ts` |
 | Los errores internos **no** se devuelven al cliente | `src/lib/guards.ts` → `errorInterno` |
-| Registro de quién hizo qué y cuándo | `src/lib/auditoria.ts` |
+| Registro de quién hizo qué y cuándo, con IP y valores anteriores/nuevos | `src/lib/auditoria.ts` |
 | Los datos exportados se generan **en memoria**, nunca en disco | `src/app/api/exportar/*` |
 
 ### Lo que NO hace (pendiente para producción real)
 
 - **Sin HTTPS.** Sin TLS las contraseñas viajan en claro. Es obligatorio detrás de Nginx +
   Let's Encrypt.
-- **Sin rate limiting** en el login: se podrían probar contraseñas a fuerza bruta.
-- **Sin verificación por correo** ni recuperación de contraseña.
-- **Sin CAPTCHA.**
-- **Sin dependencia externa de auditoría.** Las contraseñas se pueden cambiar desde
-  *Usuarios*, pero no hay "olvidé mi contraseña" por correo.
-- **La cuenta admin inicial es conocida** (`admin@umsa.bo` / `admin123`) si se corrió el seed.
+- **El rate limiting es en memoria**: vive en el proceso del servidor (`src/lib/rateLimit.ts`), no
+  en la base. Con varias instancias cada una cuenta aparte, y al reiniciar el servidor los
+  contadores se ponen en cero.
+- **El correo de verificación no se envía todavía.** Falta instalar la dependencia
+  (`pnpm add nodemailer`) y configurar las variables `SMTP_*` y `CORREO_REMITENTE` en
+  `.env.local`. Sin eso, `src/lib/correo.ts` no envía nada: imprime el enlace en la consola y lo
+  devuelve en la respuesta de `/api/registro` como `enlaceVerificacion`.
+- **Sin recuperación de contraseña.** No hay "olvidé mi contraseña" por correo. El único cambio de
+  clave es manual: un admin entra a *Usuarios* → llave → *Cambiar contraseña* (exige la clave
+  actual).
+- **Sin CAPTCHA.** Queda el rate limiting como única defensa contra ataques automatizados.
+- **La cuenta admin inicial es conocida** (`adm@gen.bo` / `adm`) si se corrió el seed.
   Hay que cambiarla.
+
+> Nota: verificar el correo **no** habilita el registro por sí solo. La persona queda en estado
+> `PENDIENTE` hasta que un administrador la valida desde *Registros*.
 
 ---
 
-## 7. Copias de seguridad
+## 8. Copias de seguridad
 
 `scripts/backup.sh` hace el backup con `pg_dump` y rota los archivos viejos:
 
@@ -278,20 +349,21 @@ Programarlo todos los días a las 02:00 (Linux, `crontab -e`):
 **Un backup que nunca se restauró no es un backup.** Pruébalo:
 
 ```bash
-createdb -T template0 -E UTF8 --locale-provider=icu --icu-locale=es-BO-x-icu prueba_restore
+createdb -E UTF8 prueba_restore
 pg_restore -d prueba_restore /var/backups/seguit/sistitulados_ULTIMO.dump && echo "BACKUP OK"
 ```
 
 ---
 
-## 8. Problemas frecuentes
+## 9. Problemas frecuentes
 
 | Síntoma | Causa | Solución |
 |---|---|---|
 | `relation "personas" does not exist` | No se aplicó el esquema | `pnpm db:migrate` |
 | `password authentication failed for user "postgres"` | La clave de `.env.local` no coincide | Revisar `DATABASE_URL` |
+| `DATABASE_URL no está definido` | Falta `.env.local` o la variable | `cp .env.example .env.local` y completarla |
 | `SESSION_SECRET es obligatorio en producción` | Falta la variable | Ver sección 4 |
-| Los apellidos con `Ñ` salen desordenados | La BD se creó con collation de Windows | Recrear la BD (sección 3) |
+| Los apellidos con `Ñ` salen desordenados | La BD se creó con la collation por defecto del sistema | Recrear la BD con la collation que usa el servidor (sección 3) |
 | `column "personas.sector_trabajo" must appear in the GROUP BY clause` | Se editó una expresión agrupada sin actualizarla | Repetir la misma expresión en `select()` y `groupBy()` |
 | `CASE types ... cannot be matched` | Se mezcló un enum con un `text` en un `CASE` | Castear con `::text` |
 | `Cannot find module '.next/standalone/server.js'` | `output: "standalone"` no está activado | `pnpm start` (o activar standalone) |

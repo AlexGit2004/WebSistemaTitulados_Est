@@ -1,0 +1,63 @@
+# Dependencias
+node_modules/
+.pnpm-store/
+
+# Build de Next.js
+.next/
+out/
+build/
+next-env.d.ts.timestamp
+
+# Variables de entorno — NUNCA subir estos archivos
+.env
+.env.local
+.env.development.local
+.env.production.local
+.env*.local
+
+# Migraciones generadas (opcional: descomentar si se decide no versionarlas)
+# drizzle/meta/_journal.json.bak
+*sql.gz
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editores
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+
+# Certificados y claves — nunca deben subirse
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Datos de base de datos / backups
+*.dump
+*.sql.gz
+backups/
+
+# Archivos GENERADOS, no fuente. Se recrean con:
+#   pnpm generar:datos   -> vuelve a crear datos_prueba.csv
+datos_prueba.csv
+*.csv
+
+# Reportes de prueba generados por los tests
+reporte_prueba.pdf
+*.pdf
+
+# Compresiones del proyecto
+*.zip

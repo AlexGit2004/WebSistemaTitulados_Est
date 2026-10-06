@@ -41,6 +41,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import ExportModal from "@/components/ExportModal";
 
 const COLORS_LIGHT = [
   "#1e3a8a", // Azul UMSA
@@ -92,6 +93,13 @@ export default function AdminDashboardPage() {
   const [anioMin, setAnioMin] = useState<string>("");
   const [anioMax, setAnioMax] = useState<string>("");
 
+  // Modal de exportación
+  const [exportModal, setExportModal] = useState<{
+    open: boolean;
+    formato: "excel" | "csv";
+    params: URLSearchParams;
+  }>({ open: false, formato: "excel", params: new URLSearchParams() });
+
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -136,25 +144,23 @@ export default function AdminDashboardPage() {
     if (anioMin) params.append("anioMin", anioMin);
     if (anioMax) params.append("anioMax", anioMax);
 
-    window.open(`/api/exportar?${params.toString()}`, "_blank");
+    setExportModal({ open: true, formato, params });
+  };
+
+  const confirmExport = () => {
+    const url = `/api/exportar?${exportModal.params.toString()}`;
+    window.open(url, "_blank");
   };
 
   const handlePrint = () => {
     window.print();
   };
 
-  // Reporte PDF generado en el servidor (antes solo existía window.print(), que no
-  // produce ningún archivo y no sirve como evidencia de acreditación).
-  const handlePdf = (conDetalle: boolean) => {
-    const params = new URLSearchParams();
-    params.append("vista", vista);
-    if (conDetalle) params.append("conDetalle", "1");
-    if (sector !== "TODOS") params.append("sector", sector);
-    if (modalidad !== "TODAS") params.append("modalidad", modalidad);
-    if (anioMin) params.append("anioMin", anioMin);
-    if (anioMax) params.append("anioMax", anioMax);
-    window.open(`/api/exportar/pdf?${params.toString()}`, "_blank");
-  };
+  // Nota: los botones "PDF" y "PDF + detalle" se eliminaron a pedido del usuario
+  // (bugs.md §3 caso 2). El endpoint /api/exportar/pdf sigue existiendo en el
+  // servidor por si más adelante se decide rehabilitarlo; lo que ya no hay es la
+  // forma de dispararlo desde la interfaz. El informe oficial se obtiene con
+  // "Imprimir Informe", que ahora sale con carátula y solo con las métricas.
 
   if (authLoading) {
     return <div className="max-w-3xl mx-auto p-8 text-sm text-slate-500">Verificando sesión…</div>;
@@ -184,7 +190,7 @@ export default function AdminDashboardPage() {
       )}
 
       {/* Header Institucional de Acreditación (Oficial de Titulados) */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6 transition-colors">
+      <div className="no-print bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6 transition-colors">
         <div>
           <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-blue-900 dark:text-blue-400 mb-1.5">
             <span className="w-2.5 h-2.5 rounded-full bg-blue-700 dark:bg-blue-500"></span>
@@ -241,22 +247,6 @@ export default function AdminDashboardPage() {
             Auditoría
           </Link>
           <button
-            onClick={() => handlePdf(false)}
-            className="inline-flex items-center gap-2 px-3.5 py-2 bg-rose-700 hover:bg-rose-800 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
-            title="Reporte PDF con indicadores y distribuciones"
-          >
-            <FileText className="w-4 h-4" />
-            PDF
-          </button>
-          <button
-            onClick={() => handlePdf(true)}
-            className="inline-flex items-center gap-2 px-3.5 py-2 bg-rose-700 hover:bg-rose-800 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
-            title="Reporte PDF que incluye además el detalle de registros"
-          >
-            <FileText className="w-4 h-4" />
-            PDF + detalle
-          </button>
-          <button
             onClick={() => handleExport("excel")}
             className="inline-flex items-center gap-2 px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
             title="Generar Excel en memoria RAM"
@@ -284,7 +274,7 @@ export default function AdminDashboardPage() {
       </div>
 
       {/* Barra de Introducción Sigilosa / Switch Suave de Egresados */}
-      <div className="bg-slate-100/80 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-colors">
+      <div className="no-print bg-slate-100/80 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-colors">
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-950 text-blue-900 dark:text-blue-300">
             {vista === "TITULADOS" ? (
@@ -334,6 +324,48 @@ export default function AdminDashboardPage() {
             </button>
           )}
         </div>
+      </div>
+
+      {/* Carátula institucional: solo aparece en el informe impreso.
+          Replica la del PDF (reportePdf.ts) para que el papel tenga la misma
+          identificación institucional. */}
+      <div className="solo-impresion mb-6 text-center">
+        <div className="h-[3px] w-24 mx-auto bg-[#0f2d52] mb-4" />
+        <h1 className="text-lg font-black tracking-[0.15em] text-[#0f2d52]">
+          UNIVERSIDAD MAYOR DE SAN ANDRÉS
+        </h1>
+        <h2 className="text-base font-black tracking-[0.12em] text-[#0f2d52] mt-1">
+          CARRERA DE ESTADÍSTICA
+        </h2>
+        <p className="text-sm text-black mt-1">
+          Sistema de Seguimiento a Titulados y Egresados
+        </p>
+        <p className="text-xs text-black mt-1">
+          Vista: {vista} · Generado:{" "}
+          {new Date().toLocaleString("es-BO", {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </p>
+        <div className="h-[1px] w-full bg-black/30 mt-4" />
+      </div>
+
+      {/* Título de métricas */}
+      <div className="no-print flex items-center gap-3">
+        <span className="w-8 h-1 bg-[#0f2d52] dark:bg-blue-400" />
+        <h2 className="text-lg font-black tracking-tight text-slate-900 dark:text-white">
+          Métricas de {vista === "TITULADOS" ? "titulados" : "egresados"}
+        </h2>
+      </div>
+
+      {/* Título que sí se imprime: va justo encima de los filtros de análisis */}
+      <div className="mb-3">
+        <h2 className="text-base font-black tracking-tight text-black">
+          Métricas de {vista === "TITULADOS" ? "titulados" : "egresados"}
+        </h2>
       </div>
 
       {/* Barra de Filtros Global */}
@@ -389,11 +421,34 @@ export default function AdminDashboardPage() {
 
           <button
             onClick={fetchData}
-            className="p-1.5 text-slate-500 hover:text-blue-900 dark:text-slate-400 dark:hover:text-blue-400 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition"
+            className="no-print p-1.5 text-slate-500 hover:text-blue-900 dark:text-slate-400 dark:hover:text-blue-400 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition"
             title="Recargar datos"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
           </button>
+
+          {/* Lectura de los filtros en papel: los <select> e <input> no se
+              imprimen de forma útil, así que se imprime su valor como texto. */}
+          <div className="w-full text-[11px] text-black leading-relaxed">
+            <b>Filtros aplicados:</b> Sector&nbsp;=
+            {sector === "TODOS"
+              ? "Todos los sectores laborales"
+              : sector === "PUBLICO"
+                ? "Público"
+                : sector === "PRIVADO"
+                  ? "Privado"
+                  : sector === "ACADEMICO"
+                    ? "Académico / Investigación"
+                    : sector === "ONG"
+                      ? "ONG / Fundaciones"
+                      : "Otro"}
+            {vista === "TITULADOS" && (
+              <>
+                {" · "}Modalidad&nbsp;= {modalidad}
+              </>
+            )}
+            {" · "}Años&nbsp;= {anioMin || "sin mínimo"} — {anioMax || "sin máximo"}
+          </div>
         </div>
       </div>
 
@@ -804,10 +859,20 @@ export default function AdminDashboardPage() {
       </div>
 
       {/* Footer */}
-      <footer className="text-center text-xs text-slate-400 dark:text-slate-500 py-4 border-t border-slate-200 dark:border-slate-800">
+      <footer className="no-print text-center text-xs text-slate-400 dark:text-slate-500 py-4 border-t border-slate-200 dark:border-slate-800">
         Carrera de Estadística · Universidad Mayor de San Andrés · Sistema Oficial de Acreditación
         2026
       </footer>
+
+      {/* Modal de confirmación de exportación */}
+      <ExportModal
+        isOpen={exportModal.open}
+        onClose={() => setExportModal((m) => ({ ...m, open: false }))}
+        onConfirm={confirmExport}
+        title={vista === "TITULADOS" ? "titulados" : "egresados"}
+        formato={exportModal.formato}
+        params={exportModal.params}
+      />
     </div>
   );
 }

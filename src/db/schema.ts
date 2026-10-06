@@ -25,6 +25,22 @@ export const generoEnum = pgEnum("genero_enum", [
   "PREFIERO_NO_DECIR",
 ]);
 
+/**
+ * Ciclo de vida del registro (decisión D5, opción B: alta pública).
+ *
+ * PENDIENTE → el egresado se registró solo y todavía no fue validado por la Carrera: no
+ *             cuenta en métricas ni puede entrar al sistema.
+ * VALIDADO  → alta efectiva. Todos los registros ya existentes pasan a este estado con
+ *             la migración, porque ninguno nació pendiente de validación.
+ * RECHAZADO → el administrador lo descartó. La fila y el motivo se conservan, igual que
+ *             en la baja lógica, para poder contabilizar los descartes y sus causas.
+ */
+export const estadoRegistroEnum = pgEnum("estado_registro_enum", [
+  "PENDIENTE",
+  "VALIDADO",
+  "RECHAZADO",
+]);
+
 export const modalidadTitulacionEnum = pgEnum("modalidad_titulacion_enum", [
   "Tesis",
   "Proyecto de grado",
@@ -138,6 +154,18 @@ export const personas = pgTable(
     // Observaciones administrativas
     observaciones: text("observaciones"),
 
+    // Baja lógica (decisión D3): el DELETE marca la baja en vez de borrar la fila.
+    // Los datos de un egresado forman parte del histórico de acreditación, y los
+    // reportes por año y sector deben seguir contando igual. Un hard delete los
+    // haría desaparecer sin dejar rastro del contenido.
+    activo: boolean("activo").notNull().default(true),
+    estadoRegistro: estadoRegistroEnum("estado_registro").notNull().default("VALIDADO"),
+    fechaValidacion: timestamp("fecha_validacion"),
+    motivoRechazo: text("motivo_rechazo"),
+    eliminadoEn: timestamp("eliminado_en"),
+    eliminadoPor: integer("eliminado_por").references(() => usuarios.id, { onDelete: "set null" }),
+    motivoBaja: text("motivo_baja"),
+
     // Auditoría temporal
     creadoEn: timestamp("creado_en").notNull().defaultNow(),
     actualizadoEn: timestamp("actualizado_en").defaultNow(),
@@ -150,6 +178,7 @@ export const personas = pgTable(
     anioTitulacionIdx: index("idx_personas_anio_titulacion").on(table.anioTitulacion),
     anioEgresoIdx: index("idx_personas_anio_egreso").on(table.anioEgreso),
     ciudadIdx: index("idx_personas_ciudad").on(table.ciudadRegionTrabajo),
+    activoIdx: index("idx_personas_activo").on(table.activo),
   })
 );
 
@@ -165,6 +194,68 @@ export const usuarios = pgTable("usuarios", {
   creadoEn: timestamp("creado_en").notNull().defaultNow(),
   actualizadoEn: timestamp("actualizado_en").defaultNow(),
 });
+
+// ── Tabla de Sesiones (D2 · decisión aprobada) ────────────────────────────────
+/**
+ * El token de `lib/sesion.ts` es un HMAC sobre un JSON, y por sí solo es *stateless*:
+ * mientras no expiren sus 30 minutos no hay forma de cortarlo, y tampoco queda rastro
+ * de qué usuarios están conectados. Esta tabla guarda solo el SHA-256 del token
+ * (nunca el token en sí: si alguien lee la base no sirve una fila para suplantar a
+ * nadie) y permite revocar un acceso al instante y auditar las sesiones activas.
+ */
+export const sesiones = pgTable(
+  "sesiones",
+  {
+    id: serial("id").primaryKey(),
+    idUsuario: integer("id_usuario").references(() => usuarios.id, { onDelete: "cascade" }),
+    idPersona: integer("id_persona").references(() => personas.id, { onDelete: "cascade" }),
+    tokenHash: varchar("token_hash", { length: 64 }).notNull().unique(),
+    ci: varchar("ci", { length: 20 }).notNull(),
+    rol: varchar("rol", { length: 30 }).notNull(),
+    ip: varchar("ip", { length: 45 }),
+    userAgent: text("user_agent"),
+    creadaEn: timestamp("creada_en").notNull().defaultNow(),
+    ultimaActividadEn: timestamp("ultima_actividad_en").notNull().defaultNow(),
+    expiraEn: timestamp("expira_en").notNull(),
+    revocadaEn: timestamp("revocada_en"),
+    motivoRevocacion: varchar("motivo_revocacion", { length: 120 }),
+  },
+  (table) => ({
+    idUsuarioIdx: index("idx_sesiones_id_usuario").on(table.idUsuario),
+    ciIdx: index("idx_sesiones_ci").on(table.ci),
+    expiraEnIdx: index("idx_sesiones_expira_en").on(table.expiraEn),
+    revocadaEnIdx: index("idx_sesiones_revocada_en").on(table.revocadaEn),
+  })
+);
+
+// ── Tabla de Verificaciones (D5 · alta pública) ──────────────────────────────
+/**
+ * Enlaces de un solo uso para verificar que el correo que se_AUTO registra es real.
+ *
+ * Se guarda el SHA-256 del token, nunca el token: leer la tabla no permite completar
+ * el registro de otra persona. `intentos` limita los intentos por IP+token para que el
+ * enlace no se pueda adivinar por fuerza bruta.
+ */
+export const verificaciones = pgTable(
+  "verificaciones",
+  {
+    id: serial("id").primaryKey(),
+    idPersona: integer("id_persona")
+      .notNull()
+      .references(() => personas.id, { onDelete: "cascade" }),
+    proposito: varchar("proposito", { length: 40 }).notNull().default("REGISTRO"),
+    tokenHash: varchar("token_hash", { length: 64 }).notNull().unique(),
+    destino: varchar("destino", { length: 150 }).notNull(),
+    intentos: integer("intentos").notNull().default(0),
+    expiraEn: timestamp("expira_en").notNull(),
+    usadaEn: timestamp("usada_en"),
+    creadaEn: timestamp("creada_en").notNull().defaultNow(),
+  },
+  (table) => ({
+    idPersonaIdx: index("idx_verificaciones_id_persona").on(table.idPersona),
+    expiraEnIdx: index("idx_verificaciones_expira_en").on(table.expiraEn),
+  })
+);
 
 // ── Tabla de Noticias y Cursos ────────────────────────────────────────────────
 export const noticiasCursos = pgTable(
@@ -220,6 +311,17 @@ export const auditLogRelations = relations(auditLog, ({ one }) => ({
   }),
 }));
 
+export const sesionesRelations = relations(sesiones, ({ one }) => ({
+  usuario: one(usuarios, {
+    fields: [sesiones.idUsuario],
+    references: [usuarios.id],
+  }),
+  persona: one(personas, {
+    fields: [sesiones.idPersona],
+    references: [personas.id],
+  }),
+}));
+
 // ── Tipos TypeScript inferidos ────────────────────────────────────────────────
 export type Persona = typeof personas.$inferSelect;
 export type NuevaPersona = typeof personas.$inferInsert;
@@ -232,3 +334,9 @@ export type NuevaNoticiaCurso = typeof noticiasCursos.$inferInsert;
 
 export type AuditLogEntry = typeof auditLog.$inferSelect;
 export type NuevoAuditLogEntry = typeof auditLog.$inferInsert;
+
+export type SesionRow = typeof sesiones.$inferSelect;
+export type NuevaSesionRow = typeof sesiones.$inferInsert;
+
+export type VerificacionRow = typeof verificaciones.$inferSelect;
+export type NuevaVerificacionRow = typeof verificaciones.$inferInsert;

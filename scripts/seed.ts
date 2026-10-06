@@ -13,9 +13,6 @@
  *   pnpm seed -- --reset   -> borra primero las filas de prueba (solo desarrollo)
  */
 
-import * as dotenv from "dotenv";
-dotenv.config({ path: ".env.local" });
-
 import { db, pool } from "../src/db";
 import { personas, usuarios, noticiasCursos } from "../src/db/schema";
 import { sql } from "drizzle-orm";
@@ -23,8 +20,8 @@ import { hashPassword } from "../src/lib/password";
 
 const RESET = process.argv.includes("--reset");
 
-const ADMIN_CORREO = "admin@umsa.bo";
-const ADMIN_PASSWORD = "admin123";
+const ADMIN_CORREO = "adm@gen.bo";
+const ADMIN_PASSWORD = "adm";
 
 async function main() {
   const yaHay = await db.select({ n: sql<number>`count(*)` }).from(personas);

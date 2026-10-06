@@ -9,6 +9,8 @@ import { loginSchema, primerErrorZod } from "@/lib/validaciones";
 import { registrarAuditoria, ipDesde } from "@/lib/auditoria";
 import { errorInterno } from "@/lib/guards";
 import { verificarLimite, registrarIntento, limpiarIntentos } from "@/lib/rateLimit";
+import { registrarSesion } from "@/lib/sesiones";
+import { DURACION_SESION_MS } from "@/lib/sesion";
 
 export const dynamic = "force-dynamic";
 
@@ -95,7 +97,19 @@ export async function POST(req: NextRequest) {
         correo: u.correo,
       });
 
-      cookieStore.set("seguit_sesion", token, opcionesCookie());
+cookieStore.set("seguit_sesion", token, opcionesCookie());
+
+      // Rastro de la sesión en `sesiones` (decisión D2): permite revocarla al instante
+      // y saber qué accesos están abiertos. Nunca bloquea el login si falla.
+      await registrarSesion({
+        token,
+        idUsuario: u.id,
+        ci: u.ci ?? "",
+        rol: "admin",
+        expiracionMs: DURACION_SESION_MS,
+        ip: ipDesde(req),
+        userAgent: req.headers.get("user-agent"),
+      });
 
       return NextResponse.json({
         rol: "admin",
@@ -114,6 +128,8 @@ export async function POST(req: NextRequest) {
         cedulaIdentidad: personas.cedulaIdentidad,
         tipo: personas.tipo,
         correoElectronico: personas.correoElectronico,
+        activo: personas.activo,
+        estadoRegistro: personas.estadoRegistro,
       })
       .from(personas)
       .where(sql`upper(${personas.cedulaIdentidad}) = ${entrada}`)
@@ -125,6 +141,11 @@ export async function POST(req: NextRequest) {
 
     if (!persona) return await credencialesInvalidas();
 
+    // Baja lógica (decisión D3): un registro dado de baja no puede iniciar sesión, aunque
+    // el usuario siga recordando su contraseña. Se comprueba DESPUÉS de validar la
+    // contraseña y no antes, para que la respuesta siga siendo la misma para una cédula
+    // inexistente y para una dada de baja, y no sirva para enumerar quién está dado de
+    // baja en el sistema.
     const comoUsuario = await db
       .select({ passwordHash: usuarios.passwordHash, estado: usuarios.estado })
       .from(usuarios)
@@ -146,6 +167,49 @@ export async function POST(req: NextRequest) {
       return await credencialesInvalidas();
     }
 
+    if (!persona.activo) {
+      registrarIntento(ip, entrada);
+      await registrarAuditoria({
+        accion: "editar",
+        entidad: "sesion",
+        entidadId: persona.id,
+        detalles: `Intento de acceso a un registro dado de baja: CI ${entrada}`,
+        req,
+      });
+      return NextResponse.json(
+        {
+          error: "Su registro se encuentra dado de baja. Contacte a la Carrera de Estadística.",
+          codigo: "REGISTRO_DADO_DE_BAJA",
+        },
+        { status: 403 }
+      );
+    }
+
+    // Alta pública (D5): hasta que un administrador valida la solicitud, el registro no
+    // habilita el acceso. Se comprueba DESPUÉS de validar la contraseña, como la baja
+    // lógica, para que la respuesta no sirva para averiguar qué cédulas están pendientes
+    // ni cuáles fueron rechazadas.
+    if (persona.estadoRegistro !== "VALIDADO") {
+      registrarIntento(ip, entrada);
+      const rechazado = persona.estadoRegistro === "RECHAZADO";
+      await registrarAuditoria({
+        accion: "editar",
+        entidad: "sesion",
+        entidadId: persona.id,
+        detalles: `Intento de acceso con registro ${persona.estadoRegistro}: CI ${entrada}`,
+        req,
+      });
+      return NextResponse.json(
+        {
+          error: rechazado
+            ? "Su solicitud de registro fue rechazada. Contacte a la Carrera de Estadística."
+            : "Su solicitud de registro está pendiente de validación por la Carrera de Estadística.",
+          codigo: rechazado ? "REGISTRO_RECHAZADO" : "REGISTRO_PENDIENTE",
+        },
+        { status: 403 }
+      );
+    }
+
     limpiarIntentos(ip, entrada);
 
     // ⚠️ FIX: Usar await al crear el token
@@ -157,7 +221,20 @@ export async function POST(req: NextRequest) {
       correo: persona.correoElectronico,
     });
 
-    cookieStore.set("seguit_sesion", token, opcionesCookie());
+cookieStore.set("seguit_sesion", token, opcionesCookie());
+
+    await registrarSesion({
+      token,
+      // `id_usuario` apunta a `usuarios`; un titular sin cuenta propia no tiene fila
+      // ahí, se identifica por `id_persona`.
+      idUsuario: null,
+      idPersona: persona.id,
+      ci: persona.cedulaIdentidad,
+      rol: persona.tipo,
+      expiracionMs: DURACION_SESION_MS,
+      ip: ipDesde(req),
+      userAgent: req.headers.get("user-agent"),
+    });
 
     await registrarAuditoria({
       accion: "editar",

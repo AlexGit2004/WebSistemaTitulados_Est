@@ -144,7 +144,19 @@ button, a.inline-flex {
   transition: all 150ms ease;
 }
 button:hover, a.inline-flex:hover {
-  filter: brightness(1.08);
+  filter: none;
+}
+
+html:not(.dark) button:hover,
+html:not(.dark) a.inline-flex:hover {
+  background-color: #0f172a !important;
+  color: #fff !important;
+}
+
+html.dark button:hover,
+html.dark a.inline-flex:hover {
+  background-color: #fff !important;
+  color: #0f172a !important;
 }
 
 body {
@@ -161,4 +173,37 @@ body {
   header, footer, button, input, select {
     box-shadow: none !important;
   }
+
+  /* Todo lo marcado con .no-print desaparece al imprimir: navbar, barra de
+     módulos, switch de vista, modal de exportación y el pie de página. El
+     informe sale limpio, desde la carátula hasta la tabla de cohortes. */
+  .no-print {
+    display: none !important;
+  }
+
+  /* Bloques que solo existen en papel (carátula institucional). */
+  .solo-impresion {
+    display: block !important;
+  }
+
+  /* Los <select> y <input> de los filtros no imprimen bien: se reemplaza por
+     su texto legible para que quede constancia de qué se filtró. */
+  .filtro-impresion {
+    display: inline-block !important;
+    font-size: 11pt;
+    font-weight: 700;
+    color: #000;
+  }
+
+  main {
+    padding: 0 !important;
+  }
+
+  @page {
+    margin: 14mm;
+  }
+}
+
+.solo-impresion {
+  display: none;
 }

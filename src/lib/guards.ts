@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import { leerSesionDeRequest } from "./sesion";
+import { leerSesionDeRequest, type Sesion } from "./sesion";
+import { NOMBRE_COOKIE } from "./sesion";
+import type { NextRequest } from "next/server";
 
 /**
  * Guardas de autorización para los API Routes.
@@ -24,7 +26,7 @@ import { leerSesionDeRequest } from "./sesion";
 export async function exigirAdmin(
   req: Parameters<typeof leerSesionDeRequest>[0]
 ): Promise<NextResponse | null> {
-  const sesion = await leerSesionDeRequest(req);
+  const sesion = await leerSesionVigente(req);
   if (!sesion) {
     await registrarAccesoDenegado(req, "sin sesión válida");
     return NextResponse.json({ error: "Debe iniciar sesión" }, { status: 401 });
@@ -40,12 +42,36 @@ export async function exigirAdmin(
   return null;
 }
 
+/**
+ * Segunda capa de la revocación (decisión D2).
+ *
+ * `leerSesionDeRequest` solo comprueba la firma del token. Cuando la sesión se revoca
+ * —logout desde otro dispositivo, cambio de contraseña— el token sigue siendo
+ * criptográficamente válido hasta que expira, así que aquí se consulta la fila de
+ * `sesiones` antes de dar por buena la sesión. La consulta es por el SHA-256 del token
+ * (columna indexada y única), no por un escaneo de la tabla.
+ */
+export async function leerSesionVigente(
+  req: Parameters<typeof leerSesionDeRequest>[0]
+): Promise<Sesion | null> {
+  const sesion = await leerSesionDeRequest(req);
+  if (!sesion) return null;
+
+  const token = req.cookies.get(NOMBRE_COOKIE)?.value;
+  if (!token) return null;
+
+  const { sesionEstaVigente } = await import("./sesiones");
+  if (await sesionEstaVigente(token)) return sesion;
+
+  return null;
+}
+
 /** Admin, o bien el propio titular de la persona indicada por `ci`. */
 export async function exigirAdminOContacto(
   req: Parameters<typeof leerSesionDeRequest>[0],
   ciSolicitada: string
 ): Promise<NextResponse | null> {
-  const sesion = await leerSesionDeRequest(req);
+  const sesion = await leerSesionVigente(req);
   if (!sesion) {
     await registrarAccesoDenegado(req, "sin sesión válida");
     return NextResponse.json({ error: "Debe iniciar sesión" }, { status: 401 });

@@ -1,29 +1,140 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { NOMBRE_COOKIE, opcionesCookie, verificarToken } from "@/lib/sesion";
+import { db } from "@/db";
+import { usuarios } from "@/db/schema";
+import { eq } from "drizzle-orm";
+import { registrarAuditoria, ipDesde } from "@/lib/auditoria";
+import { errorInterno } from "@/lib/guards";
+import {
+  DURACION_SESION_MS,
+  NOMBRE_COOKIE,
+  leerSesionDeRequest,
+  opcionesCookie,
+} from "@/lib/sesion";
+import {
+  limpiarSesionesVencidas,
+  revocarSesion,
+  sesionEstaVigente,
+  tokenDeRequest,
+} from "@/lib/sesiones";
 
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/auth/sesion
- * Devuelve la sesión actual leída de la cookie httpOnly.
+ * Fuente única de verdad del estado de sesión (decisión D1, aprobada).
  *
- * Antes, el cliente leía `localStorage.getItem("auth_user")`, que cualquiera podía
- * editar desde la consola del navegador (poniendo rol "admin" y entrando al dashboard).
+ * Antes este archivo devolvía `{"message": "Sesión funcionando"}` sin mirar la cookie,
+ * así que el frontend no tenía forma de saber quién está conectado y cada pantalla
+ * repetía su propia validación.
+ *
+ * Contrato:
+ *   GET  → 200 con los datos de quien está conectado, o 401 si no hay sesión válida.
+ *   POST → cierre de sesión: revoca el registro en `sesiones`, borra la cookie y
+ *          deja la operación anotada en `audit_log`. Responde 200 incluso sin sesión,
+ *          porque cerrar sesión nunca debe fallar.
+ *
+ * Nota sobre `accion`: el enum `audit_accion_enum` no tiene valores "login"/"logout",
+ * así que se usan `crear` y `eliminar` sobre la entidad `sesion`, que describen el
+ * evento con precisión ("se creó una sesión" / "se eliminó una sesión").
  */
+
+const ROLES_CONOCIDOS = new Set(["admin", "TITULADO", "EGRESADO"]);
+
 export async function GET(req: NextRequest) {
-  const token = req.cookies.get(NOMBRE_COOKIE)?.value;
-  const sesion = await verificarToken(token);
+  try {
+    const sesion = await leerSesionDeRequest(req);
+    if (!sesion) {
+      return NextResponse.json({ autenticado: false }, { status: 401 });
+    }
 
-  if (!sesion) {
-    return NextResponse.json({ user: null });
+    // El token firmado puede seguir siendo criptográficamente válido aunque la sesión
+    // se haya revocado (logout en otro dispositivo, cambio de contraseña). La fila de
+    // `sesiones` es la que manda.
+    const token = tokenDeRequest(req);
+    if (token && !(await sesionEstaVigente(token))) {
+      const respuesta = NextResponse.json(
+        { autenticado: false, error: "La sesión fue revocada" },
+        { status: 401 }
+      );
+      respuesta.cookies.set(NOMBRE_COOKIE, "", opcionesCookie(0));
+      return respuesta;
+    }
+
+    // Si el rol del token no es uno conocido, no se devuelve nada: un rol inventado
+    // habilita menos, nunca más.
+    if (!ROLES_CONOCIDOS.has(sesion.rol)) {
+      const respuesta = NextResponse.json(
+        { autenticado: false, error: "Rol desconocido" },
+        { status: 401 }
+      );
+      respuesta.cookies.set(NOMBRE_COOKIE, "", opcionesCookie(0));
+      return respuesta;
+    }
+
+    return NextResponse.json({
+      autenticado: true,
+      id: sesion.sub,
+      rol: sesion.rol,
+      ci: sesion.ci,
+      nombre: sesion.nombre ?? null,
+      correo: sesion.correo ?? null,
+      expiraEn: Date.now() + DURACION_SESION_MS,
+    });
+  } catch (e) {
+    return errorInterno(e, "auth/sesion GET");
   }
-
-  return NextResponse.json({ user: sesion });
 }
 
-/** DELETE /api/auth/logout — borra la cookie de sesión. */
-export async function DELETE() {
-  cookies().set(NOMBRE_COOKIE, "", opcionesCookie(0));
-  return NextResponse.json({ ok: true });
+export async function POST(req: NextRequest) {
+  try {
+    const token = tokenDeRequest(req);
+
+    // El logout se resuelve primero desde la cookie: si la sesión ya expiró, el token
+    // no se puede verificar y sin embargo hay que cerrar la sesión igualmente.
+    const sesion = await leerSesionDeRequest(req);
+
+    if (token) {
+      await revocarSesion(token, "Cierre de sesión del usuario");
+    }
+
+    if (sesion) {
+      // Si el usuario es un administrador, se anota contra su id en `usuarios`. Un
+      // titular sin cuenta propia se registra con `idUsuario` nulo.
+      const esAdmin = sesion.rol === "admin";
+      const idUsuario = esAdmin ? sesion.sub : null;
+
+      // Comprobación adicional: si el administrador fue desactivado o bloqueado
+      // mientras tenía la sesión abierta, el cierre de sesión lo refleja en el log.
+      let estadoAdmin: string | null = null;
+      if (esAdmin) {
+        const filas = await db
+          .select({ estado: usuarios.estado })
+          .from(usuarios)
+          .where(eq(usuarios.id, sesion.sub))
+          .limit(1);
+        estadoAdmin = filas[0]?.estado ?? null;
+      }
+
+      await registrarAuditoria({
+        accion: "eliminar",
+        entidad: "sesion",
+        entidadId: sesion.sub,
+        idUsuario,
+        detalles:
+          `Cierre de sesión de ${sesion.nombre ?? sesion.ci} (${sesion.rol})` +
+          (estadoAdmin ? ` · estado de la cuenta: ${estadoAdmin}` : "") +
+          ` · IP ${ipDesde(req) ?? "desconocida"}`,
+        req,
+      });
+    }
+
+    // La limpieza de filas vencidas se lanza sin esperar: no puede hacer fallar el
+    // cierre de sesión.
+    void limpiarSesionesVencidas();
+
+    const respuesta = NextResponse.json({ cerrado: true });
+    respuesta.cookies.set(NOMBRE_COOKIE, "", opcionesCookie(0));
+    return respuesta;
+  } catch (e) {
+    return errorInterno(e, "auth/sesion POST");
+  }
 }

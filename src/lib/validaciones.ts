@@ -55,17 +55,30 @@ const textoOpcional = (max = 500) =>
     .nullable()
     .optional();
 
-/** Campos que el ADMIN puede escribir (incluye los "K" de Kardex). */
+/**
+ * Campos que el ADMIN puede escribir (incluye los "K" de Kardex).
+ *
+ * Decisión D7 (aprobada): validación estricta y condicional.
+ *   · Siempre obligatorios: cedula_identidad, nombres_apellidos, tipo y genero.
+ *   · TITULADO → anio_titulacion y modalidad_titulacion.
+ *   · EGRESADO y planea_titularse = NO → motivo_no_titulacion.
+ *   · sector_trabajo = OTRO → sector_trabajo_otro.
+ *
+ * `tipo` y `genero` NO llevan `.default(...)`: con un valor por defecto, un alta que
+ * se cuelgue la mitad y omita el tipo se guardaría silenciosamente como TITULADO, y
+ * un titular que no conteste género quedaría como "PREFIERO_NO_DECIR" sin que nadie se
+ * entere. Exigirlos convierte esos dos casos en un error visible y con mensaje.
+ */
 export const personaAdminSchema = z
   .object({
-    tipo: tipoEnum.default("TITULADO"),
+    tipo: tipoEnum,
     nombresApellidos: z.string().trim().min(3, "Nombre muy corto").max(150, "Máximo 150 caracteres"),
     cedulaIdentidad: z
       .string()
       .trim()
       .toUpperCase()
       .regex(CI_REGEX, "Cédula inválida (se espera el número, con sufijo opcional)"),
-    genero: generoEnum.default("PREFIERO_NO_DECIR"),
+    genero: generoEnum,
     semestreIngreso: semestre.nullable().optional(),
     semestreEgreso: semestre.nullable().optional(),
     anioEgreso: anio.nullable().optional(),
@@ -255,6 +268,139 @@ export const personaAutogestionSchema = z
     }
   });
 
+/**
+ * Alta pública (decisión D5, opción B): lo que puede enviar un egresado sin sesión.
+ *
+ * Es deliberadamente MÁS RESTRICTIVO que `personaAdminSchema` en un punto —el correo es
+ * obligatorio, porque es lo único que prueba que la persona controla el buzón— y más
+ * LAX en los datos de contacto: un egresado que se registra a sí mismo no tiene por qué
+ * conocer su código ORCID ni su zona de trabajo. Los campos que sí exige la ley sí se
+ * piden. Lo que se omita queda `null` y el administrador lo completa al validar.
+ *
+ * `.strict()` para que un envío anónimo no pueda colar campos que no le pertenecen
+ * (`activo`, `estadoRegistro`, `eliminadoEn`…) simplemente porque se manden en el JSON.
+ */
+export const personaRegistroPublicoSchema = z
+  .object({
+    tipo: tipoEnum,
+    nombresApellidos: z.string().trim().min(3, "Nombre muy corto").max(150, "Máximo 150 caracteres"),
+    cedulaIdentidad: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .regex(CI_REGEX, "Cédula inválida (se espera el número, con sufijo opcional)"),
+    genero: generoEnum,
+
+    // Obligatorio en el alta pública: es el buzón al que se manda el enlace.
+    correoElectronico: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .email("Correo inválido")
+      .max(150),
+
+    telefono: z
+      .string()
+      .trim()
+      .max(20)
+      .regex(/^[0-9+\-\s()]*$/, "Teléfono inválido")
+      .transform((v) => (v === "" ? null : v))
+      .nullable()
+      .optional(),
+
+    semestreIngreso: semestre.nullable().optional(),
+    semestreEgreso: semestre.nullable().optional(),
+    anioEgreso: anio.nullable().optional(),
+    anioTitulacion: anio.nullable().optional(),
+    modalidadTitulacion: modalidadEnum.nullable().optional(),
+    areaEspecializacion: textoOpcional(200),
+
+    planeaTitularse: planeaEnum.nullable().optional(),
+    inicioProcesoTitulacion: inicioProcesoEnum.nullable().optional(),
+    motivoNoTitulacion: motivoEnum.nullable().optional(),
+
+    ciudadRegionTrabajo: textoOpcional(200),
+    estadoLaboral: estadoLaboralEnum.nullable().optional(),
+    sectorTrabajo: sectorEnum.nullable().optional(),
+    sectorTrabajoOtro: textoOpcional(200),
+    ocupacionCargo: textoOpcional(200),
+    trabajaEnEstadistica: z.coerce.boolean().default(false),
+    observaciones: textoOpcional(2000),
+  })
+  .strict()
+  .superRefine((v, ctx) => {
+    // Mismas reglas condicionales que el alta del administrador (decisión D7).
+    if (v.sectorTrabajo === "OTRO" && !v.sectorTrabajoOtro) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["sectorTrabajoOtro"],
+        message: "Debe especificar cuál es el otro sector",
+      });
+    }
+    if (v.sectorTrabajo !== "OTRO" && v.sectorTrabajoOtro) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["sectorTrabajoOtro"],
+        message: "Solo aplica si el sector es 'OTRO'",
+      });
+    }
+    if (v.tipo === "TITULADO" && !v.anioTitulacion) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["anioTitulacion"],
+        message: "Un titulado debe tener año de titulación",
+      });
+    }
+    if (v.tipo === "TITULADO" && !v.modalidadTitulacion) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["modalidadTitulacion"],
+        message: "Un titulado debe tener modalidad de titulación",
+      });
+    }
+    if (v.tipo === "TITULADO" && (v.planeaTitularse || v.motivoNoTitulacion)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["planeaTitularse"],
+        message: "Este campo es exclusivo de egresados",
+      });
+    }
+    if (v.tipo === "EGRESADO") {
+      if (!v.planeaTitularse) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["planeaTitularse"],
+          message: "Todo egresado debe indicar si planea titularse",
+        });
+      }
+      if (v.planeaTitularse === "SI" && !v.inicioProcesoTitulacion) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["inicioProcesoTitulacion"],
+          message: "Si planea titularse, indique si ya inició el proceso",
+        });
+      }
+      const pideMotivo =
+        v.planeaTitularse === "NO" ||
+        v.planeaTitularse === "NO_SABE" ||
+        (v.planeaTitularse === "SI" && v.inicioProcesoTitulacion === "NO");
+      if (pideMotivo && !v.motivoNoTitulacion) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["motivoNoTitulacion"],
+          message: "Debe indicar el motivo de no titulación",
+        });
+      }
+      if (!pideMotivo && v.motivoNoTitulacion) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["motivoNoTitulacion"],
+          message: "No aplica: ya inició su proceso de titulación",
+        });
+      }
+    }
+  });
+
 export const usuarioSchema = z.object({
   nombre: z.string().trim().min(3, "Nombre muy corto").max(150),
   correo: z.string().trim().toLowerCase().email("Correo inválido").max(150),
@@ -279,6 +425,7 @@ export const loginSchema = z.object({
 });
 
 export type PersonaAdminInput = z.infer<typeof personaAdminSchema>;
+export type PersonaRegistroPublicoInput = z.infer<typeof personaRegistroPublicoSchema>;
 export type PersonaAutogestionInput = z.infer<typeof personaAutogestionSchema>;
 
 /** Convierte los issues de zod en un mensaje legible. */

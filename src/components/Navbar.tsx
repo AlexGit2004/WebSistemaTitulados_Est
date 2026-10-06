@@ -181,12 +181,12 @@ export default function Navbar() {
                   Sesión activa
                 </span>
               </div>
-            ) : (
+            ) : !isEstadistica ? (
               <Link href="/login" className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 bg-transparent text-white/90 text-xs font-bold hover:text-white shrink-0 min-h-[40px]">
                 <LogIn className="w-4 h-4 shrink-0" />
                 <span className="hidden 2xl:inline">Ingresar</span>
               </Link>
-            )}
+            ) : null}
 
             {/* Hamburguesa - todas las opciones (solo al reducir resolución) */}
             <button onClick={() => setMenuOpen((o) => !o)} className="flex lg:hidden p-2 rounded-lg border border-white/20 text-white/90 hover:bg-white/10 min-h-[40px] items-center gap-1.5 text-xs font-bold" aria-label="menú">

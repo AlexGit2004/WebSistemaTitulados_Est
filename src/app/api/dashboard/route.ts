@@ -30,6 +30,14 @@ function construirFiltros(searchParams: URLSearchParams) {
 
   const conds: SQL[] = [];
 
+  // Se aplican siempre, antes que cualquier filtro del usuario, y NO cuentan como
+  // "filtro" a efectos de `hayFiltros` (por eso el contador de usuario va aparte):
+  //   · D3 baja lógica: un registro dado de baja no cuenta para la acreditación.
+  //   · D5 alta pública: una solicitud PENDIENTE o RECHAZADA tampoco, hasta que un
+  //     administrador la valide.
+  conds.push(eq(personas.activo, true), eq(personas.estadoRegistro, "VALIDADO"));
+  const filtrosUsuario = conds.length;
+
   if (sector && sector !== "TODOS") conds.push(eq(personas.sectorTrabajo, sector as any));
   if (modalidad && modalidad !== "TODAS")
     conds.push(eq(personas.modalidadTitulacion, modalidad as any));
@@ -37,7 +45,7 @@ function construirFiltros(searchParams: URLSearchParams) {
   if (anioMax) conds.push(sql`coalesce(${personas.anioTitulacion}, ${personas.anioEgreso}) <= ${parseInt(anioMax, 10)}`);
 
   const where: Cond = conds.length ? and(...conds) : undefined;
-  return { where, hayFiltros: conds.length > 0 };
+  return { where, hayFiltros: conds.length > filtrosUsuario };
 }
 
 /** Coalesce de columnas de enum a texto, para agrupar por nombre legible. */

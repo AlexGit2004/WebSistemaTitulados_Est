@@ -41,6 +41,10 @@ export async function GET(req: NextRequest) {
     }
 
     const conds: SQL[] = [];
+    // Baja lógica (decisión D3): los reportes de acreditación no cuentan las bajas.
+    if (sp.get("incluirBajas") !== "true") {
+      conds.push(eq(personas.activo, true), eq(personas.estadoRegistro, "VALIDADO"));
+    }
     const sector = sp.get("sector");
     if (sector && sector !== "TODOS") conds.push(eq(personas.sectorTrabajo, sector as any));
     const modalidad = sp.get("modalidad");

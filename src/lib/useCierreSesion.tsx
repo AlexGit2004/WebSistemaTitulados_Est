@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { LogOut, Loader2 } from "lucide-react";
@@ -65,6 +66,11 @@ export function useCierreSesion() {
   const pathname = usePathname();
   const [confirm, setConfirm] = useState<DestinoCierre | null>(null);
   const [cerrando, setCerrando] = useState(false);
+  // El overlay se monta en un portal sobre document.body. Antes se renderizaba
+  // dentro de <nav>, y como el navbar es fixed con z-50 y sus hijos crean
+  // contextos de apilamiento, el aviso "de fondo" y el "CERRANDO SESIÓN" se
+  // veían superpuestos o recortados. Con el portal solo hay una capa, la última.
+  const [montado, setMontado] = useState(false);
 
   const pathRef = useRef(pathname);
   const urlRef = useRef("");
@@ -76,6 +82,12 @@ export function useCierreSesion() {
   confirmRef.current = confirm;
   cerrandoRef.current = cerrando;
   userRef.current = user;
+
+  // El portal solo puede crearse en el cliente.
+  useEffect(() => {
+    setMontado(true);
+    return () => setMontado(false);
+  }, []);
 
   // Mantener la URL actual para poder restaurarla al interceptar "atrás".
   useEffect(() => {
@@ -192,6 +204,11 @@ export function useCierreSesion() {
     limpiarScrollGuardado();
     if (user) setConfirm("titulados");
     else router.push("/titulados");
+    
+    // Corregir: Si la ruta es /login, redirigir a /titulados para evitar bug de navegación
+    if (pathname === "/login") {
+      router.push("/titulados");
+    }
   };
 
   const pedir = (d: DestinoCierre) => setConfirm(d);
@@ -202,24 +219,26 @@ export function useCierreSesion() {
    * después de cerrar el cierre.
    */
   const aceptar = () => {
-    const destino = "/titulados";
+    const destino = "/login";
     origenRef.current = "";
     setConfirm(null);
     limpiarScrollGuardado();
     setCerrando(true);
     setTimeout(async () => {
-      // El logout borra la cookie httpOnly en el servidor, no solo localStorage.
       await logout();
       router.push(destino);
-      // Reemplaza la entrada del historial: al pulsar "atrás" después de cerrar sesión
-      // no debe devolver al dashboard, porque ya no hay sesión.
       try {
         window.history.replaceState(null, "", destino);
       } catch {}
     }, 1300);
+    
+    // Corregir: Si la ruta es /titulados, redirigir a /titulados (no a login) para evitar bug
+    if (pathname === "/titulados") {
+      router.push("/titulados");
+    }
   };
 
-  const overlay = (confirm !== null || cerrando) && (
+  const contenidoOverlay = (
     <div
       className="fixed inset-0 z-[110] flex flex-col items-center justify-center gap-5 text-white"
       style={{ backgroundColor: "var(--nav-bg)" }}
@@ -241,7 +260,7 @@ export function useCierreSesion() {
             <h2 className="text-xl font-black tracking-tight">¿Está seguro de cerrar la sesión?</h2>
             <p className="mt-2 text-sm text-white/70">
               Su sesión de <b className="text-white">{rolLabel}</b> se cerrará y volverá a la
-              página de Seguimiento a Titulados.
+              página de inicio de sesión.
             </p>
           </div>
           <div className="flex flex-col sm:flex-row gap-3 w-full max-w-sm px-4">
@@ -272,6 +291,13 @@ export function useCierreSesion() {
       )}
     </div>
   );
+
+  // Una sola capa, montada directamente en <body>. El `montado` evita que el
+  // servidor intente crear el portal (document no existe en SSR).
+  const overlay =
+    montado && (confirm !== null || cerrando)
+      ? createPortal(contenidoOverlay, document.body)
+      : null;
 
   return { sesionActiva: !!user, rolLabel, volverSeguimiento, pedir, overlay };
 }

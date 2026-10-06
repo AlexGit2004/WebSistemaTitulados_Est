@@ -32,6 +32,12 @@ export async function GET(request: NextRequest) {
     // Construcción de condiciones Drizzle
     const conditions = [];
 
+    // Baja lógica (decisión D3): lo dado de baja queda fuera de los reportes. Para
+    // incluirlo hay que pedirlo expresamente con ?incluirBajas=true.
+    if (searchParams.get("incluirBajas") !== "true") {
+      conditions.push(eq(personas.activo, true), eq(personas.estadoRegistro, "VALIDADO"));
+    }
+
     if (tipo === "TITULADOS") {
       conditions.push(eq(personas.tipo, "TITULADO"));
     } else if (tipo === "EGRESADOS") {

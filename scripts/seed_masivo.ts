@@ -13,8 +13,6 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as dotenv from "dotenv";
-dotenv.config({ path: ".env.local" });
 
 import { db, pool } from "../src/db";
 import { personas } from "../src/db/schema";

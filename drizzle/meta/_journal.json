@@ -8,6 +8,27 @@
       "when": 1790780514514,
       "tag": "0000_init_esquema_completo",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791168892892,
+      "tag": "0001_chief_captain_midlands",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791169030509,
+      "tag": "0002_large_radioactive_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791169316023,
+      "tag": "0003_marvelous_mentor",
+      "breakpoints": true
     }
   ]
 }

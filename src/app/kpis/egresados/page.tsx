@@ -5,7 +5,7 @@ import VolverSeguimiento from "@/components/VolverSeguimiento";
 
 export default function KpisEgresadosPage() {
   return (
-    <div className="min-h-screen bg-[#f1f5f9] dark:bg-slate-950">
+    <div className="min-h-[calc(100vh-56px)] bg-[#f1f5f9] dark:bg-slate-950">
       <section className="bg-gradient-to-br text-white relative overflow-hidden" style={{ backgroundImage: `linear-gradient(to bottom right, var(--hero-from), var(--hero-via), #0f172a)` }}>
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.08),transparent_50%)]" />
         <div className="max-w-7xl mx-auto px-6 py-8 lg:py-10 relative">

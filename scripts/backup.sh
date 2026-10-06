@@ -83,7 +83,7 @@ Ultimo="$(ls -1t "$BACKUP_DIR"/${NOMBRE_DB}_*.dump 2>/dev/null | head -1)"
 if [ -n "$Ultimo" ]; then
   echo ""
   echo "Para PROBAR que el backup sirve (recomendado, una vez por mes):"
-  echo "  createdb -T template0 -E UTF8 --locale-provider=icu --icu-locale=es-BO-x-icu prueba_restore"
+  echo "  createdb prueba_restore"
   echo "  pg_restore -d prueba_restore '$Ultimo' && echo 'BACKUP OK'"
   echo "  dropdb prueba_restore"
 fi

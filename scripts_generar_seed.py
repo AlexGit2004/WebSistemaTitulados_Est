@@ -3,13 +3,15 @@ Generador de datos de prueba para el Sistema de Seguimiento a Titulados y Egresa
 de la Carrera de Estadistica (UMSA).
 
 Produce un CSV UTF-8 con `N` personas (titulados y egresados) usando nombres y
-apellidos bolivianos REALES, incluidos muchos con Ñ y acentos, para poder verificar
-que la collation `es-BO-x-icu` de la base de datos los ordena correctamente.
+apellidos bolivianos REALES, incluidos muchos con Ñ y acentos.
 
 Uso:
-    python scripts_generar_seed.py --salida datos_prueba.csv --registros 10000
+    python3 scripts_generar_seed.py --salida datos_prueba.csv --registros 290 --titulados 135
 
-El CSV lo carga despues `pnpm seed -- --masivo`, que hace la insercion por lotes.
+Por defecto genera 290 personas: 135 titulados y 155 egresados. La cantidad de
+titulados es exacta y las posiciones se reparten intercaladas en el CSV.
+
+El CSV lo carga despues `pnpm seed:masivo`, que hace la insercion por lotes.
 """
 
 import argparse
@@ -115,16 +117,24 @@ def slug(texto: str) -> str:
     return texto.translate(tabla).replace("--", "-").lower()
 
 
-def generar(n: int, seed: int, anio_inicio_carrera: int = 2009):
+def generar(n: int, seed: int, anio_inicio_carrera: int = 2009,
+            n_titulados: int | None = None):
     rng = random.Random(seed)
     cis_usadas = set()
     filas = []
 
     HOY = date.today().year
 
+    # Si se pide una cantidad exacta de titulados, se reparten las posiciones de forma
+    # intercalada a lo largo del CSV (no un bloque al principio), para que cualquier
+    # muestra parcial del archivo tenga la misma proporción.
+    if n_titulados is None:
+        posiciones_titulado = {i for i in range(n) if rng.random() < 0.72}
+    else:
+        posiciones_titulado = set(rng.sample(range(n), n_titulados))
+
     for i in range(n):
-        # 72% titulados, 28% egresados (aproximando la realidad de la carrera)
-        es_titulado = rng.random() < 0.72
+        es_titulado = i in posiciones_titulado
 
         genero = rng.choices(GENEROS, weights=[46, 46, 8])[0]
         if genero == "PREFIERO_NO_DECIR":
@@ -244,12 +254,21 @@ def generar(n: int, seed: int, anio_inicio_carrera: int = 2009):
 def main():
     ap = argparse.ArgumentParser(description="Genera datos de prueba para el sistema de seguimiento.")
     ap.add_argument("--salida", default="datos_prueba.csv", help="Ruta del CSV de salida")
-    ap.add_argument("--registros", type=int, default=10000, help="Cantidad de personas a generar")
+    ap.add_argument("--registros", type=int, default=290, help="Cantidad de personas a generar")
+    ap.add_argument("--titulados", type=int, default=135,
+                    help="Cantidad exacta de titulados (el resto van a ser egresados)")
     ap.add_argument("--seed", type=int, default=20260930, help="Semilla para reproducibilidad")
     args = ap.parse_args()
 
-    print(f"Generando {args.registros} registros (seed={args.seed})...")
-    filas = generar(args.registros, args.seed)
+    if not 0 <= args.titulados <= args.registros:
+        print(f"ERROR: --titulados ({args.titulados}) debe estar entre 0 y "
+              f"--registros ({args.registros})", file=sys.stderr)
+        return 1
+
+    print(f"Generando {args.registros} registros "
+          f"({args.titulados} titulados / {args.registros - args.titulados} egresados, "
+          f"seed={args.seed})...")
+    filas = generar(args.registros, args.seed, n_titulados=args.titulados)
 
     with open(args.salida, "w", newline="", encoding="utf-8") as f:
         escritor = csv.DictWriter(f, fieldnames=ENCABEZADOS)
@@ -258,14 +277,20 @@ def main():
 
     titulados = sum(1 for x in filas if x["tipo"] == "TITULADO")
     egresados = len(filas) - titulados
-    con_enie = sum(1 for x in filas if any("\u00d1" in c for c in x["nombres_apellidos"]))
+    con_enie = sum(1 for x in filas if any("Ñ" in c for c in x["nombres_apellidos"]))
     con_acentos = sum(1 for x in filas if any(c in x["nombres_apellidos"] for c in "áéíóúÁÉÍÓÚüÜ"))
 
     print(f"OK  ->  {args.salida}")
     print(f"  titulados:      {titulados}")
     print(f"  egresados:      {egresados}")
-    print(f"  con Ñ:          {con_enie}   (para probar la collation)")
+    print(f"  con Ñ:          {con_enie}")
     print(f"  con acentos:    {con_acentos}")
+
+    if titulados != args.titulados or egresados != args.registros - args.titulados:
+        print(f"ERROR: se esperaban {args.titulados} titulados y "
+              f"{args.registros - args.titulados} egresados", file=sys.stderr)
+        return 1
+
     return 0
 
 

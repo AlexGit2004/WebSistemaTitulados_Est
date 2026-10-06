@@ -13,7 +13,7 @@
     "db:studio": "drizzle-kit studio",
     "seed": "tsx scripts/seed.ts",
     "seed:masivo": "tsx scripts/seed_masivo.ts",
-    "generar:datos": "python scripts_generar_seed.py --salida datos_prueba.csv --registros 10000",
+    "generar:datos": "python3 scripts_generar_seed.py --salida datos_prueba.csv --registros 290 --titulados 135",
     "test": "tsx --test tests/*.test.ts",
     "backup": "bash scripts/backup.sh"
   },
