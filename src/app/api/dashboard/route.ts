@@ -4,6 +4,8 @@ import { personas } from "@/db/schema";
 import { and, eq, sql, type SQL } from "drizzle-orm";
 import { leerSesionDeRequest } from "@/lib/sesion";
 import { errorInterno } from "@/lib/guards";
+import { aFiltroEnum } from "@/lib/filtros";
+import { envolverIndicador } from "@/lib/privacidad";
 
 export const dynamic = "force-dynamic";
 
@@ -38,9 +40,10 @@ function construirFiltros(searchParams: URLSearchParams) {
   conds.push(eq(personas.activo, true), eq(personas.estadoRegistro, "VALIDADO"));
   const filtrosUsuario = conds.length;
 
-  if (sector && sector !== "TODOS") conds.push(eq(personas.sectorTrabajo, sector as any));
+  const sectorValido = aFiltroEnum(personas.sectorTrabajo, sector);
+  if (sectorValido) conds.push(eq(personas.sectorTrabajo, sectorValido));
   if (modalidad && modalidad !== "TODAS")
-    conds.push(eq(personas.modalidadTitulacion, modalidad as any));
+    conds.push(eq(personas.modalidadTitulacion, aFiltroEnum(personas.modalidadTitulacion, modalidad, "TODAS")!));
   if (anioMin) conds.push(sql`coalesce(${personas.anioTitulacion}, ${personas.anioEgreso}) >= ${parseInt(anioMin, 10)}`);
   if (anioMax) conds.push(sql`coalesce(${personas.anioTitulacion}, ${personas.anioEgreso}) <= ${parseInt(anioMax, 10)}`);
 
@@ -49,7 +52,7 @@ function construirFiltros(searchParams: URLSearchParams) {
 }
 
 /** Coalesce de columnas de enum a texto, para agrupar por nombre legible. */
-const comoTexto = (col: any) => sql<string>`coalesce(${col}, 'NO_ESPECIFICADO')`;
+
 
 export async function GET(request: NextRequest) {
   try {
@@ -169,7 +172,9 @@ export async function GET(request: NextRequest) {
       .orderBy(sql`3 desc`);
 
     const aGeo = (tipo: string) =>
-      geos.filter((g) => g.tipo === tipo).map((g) => ({ ciudad: g.ciudad, total: g.n }));
+      geos
+        .filter((g) => g.tipo === tipo)
+        .map((g) => ({ ciudad: g.ciudad, total: g.n }));
 
     // ── 5) Cohortes (titulados vs egresados) ─────────────────────────────────
     const cohortes = await db
@@ -217,7 +222,14 @@ export async function GET(request: NextRequest) {
     );
 
     return NextResponse.json({
+      // `envolverIndicador` solo oculta el valor cuando NO hay muestra alguna (total 0).
+      // No hay umbral k: los conteos agregados se publican siempre.
       kpisTitulados: {
+        ...envolverIndicador(totalTitulados, totalTitulados),
+        metric_value: envolverIndicador(
+          pct(emplTitulados, totalTitulados),
+          totalTitulados
+        ).metric_value,
         totalTitulados,
         tasaEmpleabilidadTitulados: pct(emplTitulados, totalTitulados),
         tiempoPromedioEgresoTitulacion: tRow?.promEgresoTitulacion ?? 0,
@@ -225,6 +237,11 @@ export async function GET(request: NextRequest) {
         porcentajeEmpleoEstadistica: pct(enEstadistica, emplTitulados),
       },
       kpisEgresados: {
+        ...envolverIndicador(totalEgresados, totalEgresados),
+        metric_value: envolverIndicador(
+          pct(emplEgresados, totalEgresados),
+          totalEgresados
+        ).metric_value,
         totalEgresados,
         tasaEmpleabilidadEgresados: pct(emplEgresados, totalEgresados),
         tiempoPromedioInsercionEgresados: eRow?.promInsercion ?? 0,
@@ -238,6 +255,10 @@ export async function GET(request: NextRequest) {
       seriesModalidades: modalidades,
       seriesMotivosNoTitulacion: motivos,
       rangoAnios: { min: anioMinGlobal, max: anioMaxGlobal },
+      // Sin umbral k, no hay nada que anunciar sobre ocultamiento de celdas. Se declara
+      // igualmente el modelo para que la interfaz pueda explicar al visitante por qué
+      // ve conteos y no fichas.
+      privacidad: { modelo: "agregados sin datos identificativos", umbralK: null },
     });
   } catch (error: unknown) {
     return errorInterno(error, "api/dashboard");

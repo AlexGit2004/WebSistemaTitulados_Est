@@ -5,22 +5,12 @@ import { desc, eq } from "drizzle-orm";
 import { exigirAdmin, errorInterno } from "@/lib/guards";
 import { leerSesionDeRequest } from "@/lib/sesion";
 import { registrarAuditoria } from "@/lib/auditoria";
+import { noticiaSchema, primerErrorZod } from "@/lib/validaciones";
 
 export const dynamic = "force-dynamic";
 
 const TIPOS = ["noticia_institucional", "curso_evento", "noticia_social"];
 const CATEGORIAS = ["noticia", "convocatoria"];
-
-function validarVisible(body: any): string | null {
-  if (!body || typeof body !== "object") return "Cuerpo inválido";
-  if (!body.titulo || String(body.titulo).trim().length === 0) return "El título es obligatorio";
-  if (String(body.titulo).trim().length > 250) return "El título no puede superar 250 caracteres";
-  if (!body.cuerpo || String(body.cuerpo).trim().length === 0) return "La descripción (cuerpo) es obligatoria";
-  if (!TIPOS.includes(body.tipo)) return "El tipo es inválido";
-  if (!CATEGORIAS.includes(body.categoria)) return "La categoría debe ser noticia o convocatoria";
-  if (!body.fecha || Number.isNaN(new Date(body.fecha).getTime())) return "La fecha es obligatoria";
-  return null;
-}
 
 // GET /api/noticias → listado. ?admin=1 incluye no publicadas (requiere rol admin).
 export async function GET(req: NextRequest) {
@@ -50,18 +40,26 @@ export async function POST(req: NextRequest) {
   const denegado = await exigirAdmin(req);
   if (denegado) return denegado;
 
-  let body: any;
+  let crudo: unknown;
   try {
-    body = await req.json();
+    crudo = await req.json();
   } catch {
     return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
   }
-  const err = validarVisible(body);
-  if (err) return NextResponse.json({ error: err }, { status: 400 });
+  // El esquema valida tipo, longitudes y campos prohibidos ANTES de insertar: un
+  // `tipo` fuera del enum llegaba a PostgreSQL y devolvía 500 en lugar de un 400.
+  const check = noticiaSchema.safeParse(crudo);
+  if (!check.success) {
+    return NextResponse.json(
+      { error: primerErrorZod(check.error), campos: check.error.flatten().fieldErrors },
+      { status: 400 }
+    );
+  }
+  const body = check.data;
 
   const nueva: NuevaNoticiaCurso = {
-    titulo: String(body.titulo).trim(),
-    cuerpo: String(body.cuerpo).trim(),
+    titulo: body.titulo,
+    cuerpo: body.cuerpo,
     tipo: body.tipo,
     categoria: body.categoria,
     fecha: body.fecha,

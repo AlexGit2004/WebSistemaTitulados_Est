@@ -15,9 +15,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { db, pool } from "../src/db";
-import { personas } from "../src/db/schema";
+import { carreras, personas, type NuevaCarrera } from "../src/db/schema";
 import { sql } from "drizzle-orm";
 import { leerCsv } from "../src/lib/csv";
+import { asegurarCuentaKardex } from "./seed_kardex";
 
 const LOTE = 500;
 
@@ -35,6 +36,9 @@ type Crud = {
   planeaTitularse: any;
   inicioProcesoTitulacion: any;
   motivoNoTitulacion: any;
+  nivelEstudio: string | null;
+  realizoCursoUltimos3Anos: boolean | null;
+  ultimoCurso: string | null;
   correoElectronico: string | null;
   telefono: string | null;
   redesSociales: string | null;
@@ -57,7 +61,7 @@ export function filaACrud(f: Record<string, string>): Crud {
   return {
     tipo: f.tipo === "EGRESADO" ? "EGRESADO" : "TITULADO",
     nombresApellidos: f.nombres_apellidos,
-    cedulaIdentidad: f.cedula_identidad.toUpperCase(),
+    cedulaIdentidad: f.cedula_identidad.replace(/[^0-9]/g, ""),
     genero: (f.genero || "PREFIERO_NO_DECIR") as Crud["genero"],
     semestreIngreso: s2(f.semestre_ingreso),
     semestreEgreso: s2(f.semestre_egreso),
@@ -68,6 +72,9 @@ export function filaACrud(f: Record<string, string>): Crud {
     planeaTitularse: s2(f.planea_titularse),
     inicioProcesoTitulacion: s2(f.inicio_proceso_titulacion),
     motivoNoTitulacion: s2(f.motivo_no_titulacion),
+    nivelEstudio: s2(f.nivelestudio),
+    realizoCursoUltimos3Anos: f.realizo_curso_ultimos_3_anios === "" ? null : f.realizo_curso_ultimos_3_anios === "SI",
+    ultimoCurso: s2(f.ultimocurso),
     correoElectronico: s2(f.correo_electronico),
     telefono: s2(f.telefono),
     redesSociales: s2(f.redes_sociales),
@@ -102,10 +109,11 @@ async function main() {
   const vistas = new Set<string>();
   const duplicados: string[] = [];
   const validas: Crud[] = [];
+  const carrerasCsv: NuevaCarrera[] = [];
 
   for (const f of crudos) {
-    const ci = (f.cedula_identidad ?? "").trim().toUpperCase();
-    if (!ci || !f.nombres_apellidos) {
+    const ci = (f.cedula_identidad ?? "").replace(/[^0-9]/g, "");
+    if (!/^\d+$/.test(ci) || !f.nombres_apellidos) {
       continue;
     }
     if (vistas.has(ci)) {
@@ -113,7 +121,16 @@ async function main() {
       continue;
     }
     vistas.add(ci);
-    validas.push(filaACrud(f));
+    validas.push(filaACrud({ ...f, cedula_identidad: ci }));
+    if ([f.carrera, f.universidad, f.facultad, f.grados].some((value) => value?.trim())) {
+      carrerasCsv.push({
+        ci,
+        carrera: s2(f.carrera ?? ""),
+        universidad: s2(f.universidad ?? ""),
+        facultad: s2(f.facultad ?? ""),
+        grados: s2(f.grados ?? ""),
+      });
+    }
   }
 
   if (duplicados.length) {
@@ -129,6 +146,7 @@ async function main() {
 
   let insertadas = 0;
   let omitidas = 0;
+  const cisInsertadas = new Set<string>();
   const t0 = Date.now();
 
   for (let i = 0; i < validas.length; i += LOTE) {
@@ -137,6 +155,7 @@ async function main() {
 
     if (lote.length) {
       await db.insert(personas).values(lote as any);
+      for (const persona of lote) cisInsertadas.add(persona.cedulaIdentidad);
       insertadas += lote.length;
     }
 
@@ -149,6 +168,9 @@ async function main() {
 
   process.stdout.write("\n");
 
+  const nuevasCarreras = carrerasCsv.filter((carrera) => cisInsertadas.has(carrera.ci));
+  if (nuevasCarreras.length) await db.insert(carreras).values(nuevasCarreras);
+
   const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(personas);
 
   console.log("");
@@ -156,6 +178,9 @@ async function main() {
   console.log(`Omitidas:    ${omitidas} (CI ya existentes)`);
   console.log(`Total en BD: ${total}`);
   console.log(`Duración:    ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+
+  const kardex = await asegurarCuentaKardex();
+  if (kardex) console.log(`Kardex de prueba: ${kardex.correo} / ${kardex.password}`);
 
   await pool.end();
 }

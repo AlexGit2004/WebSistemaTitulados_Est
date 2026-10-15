@@ -68,6 +68,10 @@ DEPARTAMENTOS = [
 ]
 
 SECTORES = ["PUBLICO", "PRIVADO", "ACADEMICO", "ONG", "OTRO"]
+NIVELES_ESTUDIO = ["TÉCNICO", "LICENCIATURA", "LICENCIATURA CON ESPECIALIZACIÓN", "MAESTRÍA", "POSGRADO"]
+CURSOS_RECIENTES = ["ANÁLISIS DE DATOS CON R", "PYTHON PARA ESTADÍSTICA", "VISUALIZACIÓN DE DATOS", "MODELOS PREDICTIVOS"]
+CARRERAS_EXTRA = ["INFORMÁTICA", "ECONOMÍA", "MATEMÁTICA", "ADMINISTRACIÓN DE EMPRESAS", "INGENIERÍA DE SISTEMAS"]
+UNIVERSIDADES = ["UNIVERSIDAD MAYOR DE SAN ANDRÉS", "UNIVERSIDAD PÚBLICA DE EL ALTO", "UNIVERSIDAD CATÓLICA BOLIVIANA"]
 SECTORES_OTRO = [
     "Gobierno municipal", "Empresa pública", "Organismo internacional",
     "Consultora", "Cooperativa", "Fundación", "Empresa familiar",
@@ -97,15 +101,15 @@ ENCABEZADOS = [
     "motivo_no_titulacion", "correo_electronico", "telefono", "redes_sociales",
     "ciudad_region_trabajo", "estado_laboral", "sector_trabajo", "sector_trabajo_otro",
     "ocupacion_cargo", "trabaja_en_estadistica", "tiempo_egreso_titulacion_meses",
-    "tiempo_insercion_laboral_meses", "observaciones",
+    "tiempo_insercion_laboral_meses", "observaciones", "nivelestudio",
+    "realizo_curso_ultimos_3_anios", "ultimocurso", "carrera", "universidad",
+    "facultad", "grados",
 ]
 
 
 def ci_bolivia(rng: random.Random) -> str:
-    """CI boliviana: 4-8 dígitos + sufijo de departamento."""
-    sufijos = ["LP", "SC", "CB", "TQ", "OR", "PT", "CB", "SC"]
-    digitos = rng.choice([rng.randint(1000000, 9999999), rng.randint(10000000, 99999999)])
-    return f"{digitos}{rng.choice(sufijos)}"
+    """CI de prueba formada únicamente por 7 u 8 dígitos."""
+    return str(rng.choice([rng.randint(1000000, 9999999), rng.randint(10000000, 99999999)]))
 
 
 def semestre(anio: int, rng: random.Random) -> str:
@@ -202,6 +206,9 @@ def generar(n: int, seed: int, anio_inicio_carrera: int = 2009,
             # Matriz condicional: el titular no tiene estos 3 campos
             planea = inicio = motivo = ""
             tiempo_egr_tit = (anio_tit - anio_eg) * 12
+            nivel_estudio = rng.choice(NIVELES_ESTUDIO)
+            realizo_curso = rng.random() < 0.35
+            ultimo_curso = rng.choice(CURSOS_RECIENTES) if realizo_curso else ""
         else:
             anio_tit = ""
             modalidad = ""
@@ -215,6 +222,15 @@ def generar(n: int, seed: int, anio_inicio_carrera: int = 2009,
                 inicio = ""
                 motivo = rng.choice(MOTIVO)
             tiempo_egr_tit = ""
+            nivel_estudio = ""
+            realizo_curso = ""
+            ultimo_curso = ""
+
+        tiene_otra_carrera = es_titulado and rng.random() < 0.12
+        carrera_extra = rng.choice(CARRERAS_EXTRA) if tiene_otra_carrera else ""
+        universidad_extra = rng.choice(UNIVERSIDADES) if tiene_otra_carrera else ""
+        facultad_extra = "FACULTAD DE CIENCIAS PURAS Y NATURALES" if tiene_otra_carrera else ""
+        grado_extra = rng.choice(NIVELES_ESTUDIO) if tiene_otra_carrera else ""
 
         insercion = ""
         if estado != "DESEMPLEADO" and rng.random() < 0.85:
@@ -246,6 +262,13 @@ def generar(n: int, seed: int, anio_inicio_carrera: int = 2009,
             "tiempo_egreso_titulacion_meses": tiempo_egr_tit,
             "tiempo_insercion_laboral_meses": insercion,
             "observaciones": "" if rng.random() < 0.88 else "Registro de prueba generado automáticamente.",
+            "nivelestudio": nivel_estudio,
+            "realizo_curso_ultimos_3_anios": "SI" if realizo_curso is True else "NO" if realizo_curso is False else "",
+            "ultimocurso": ultimo_curso,
+            "carrera": carrera_extra,
+            "universidad": universidad_extra,
+            "facultad": facultad_extra,
+            "grados": grado_extra,
         })
 
     return filas

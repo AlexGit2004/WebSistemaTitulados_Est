@@ -127,10 +127,27 @@ async function firmar(cuerpo: string): Promise<string> {
 /**
  * Emite un token firmado. `emitidoEn` solo existe para poder probar la
  * expiración sin esperar 30 minutos en las pruebas.
+ *
+ * El cuerpo incluye `nonce`: 16 bytes aleatorios del generador criptográfico.
+ *
+ * Por qué hace falta si la firma HMAC ya impide que alguien fabrique un token:
+ * sin `nonce`, el token es DERIVABLE de datos que el atacante ya conoce (rol, CI) más
+ * una marca de tiempo en milisegundos. Eso lo convierte en un identificador
+ * predecible, que es justo lo que OWASP Session Management pide evitar: permite
+ * pre-calcular tokens válidos y adivinar el de otra persona. El `nonce` no protege
+ * nada por sí solo, pero hace que dos inicios de sesión del mismo usuario en el mismo
+ * milisegundo produzcan tokens distintos e imposibles de anticipar.
  */
 export async function crearToken(datos: DatosToken, emitidoEn: number = Date.now()): Promise<string> {
-  const cuerpo = JSON.stringify({ ...datos, emitidoEn });
+  const cuerpo = JSON.stringify({ ...datos, emitidoEn, nonce: await nonceAleatorio() });
   return `${aBase64Url(new TextEncoder().encode(cuerpo))}.${await firmar(cuerpo)}`;
+}
+
+/** 16 bytes (128 bits) del CSPRNG, en base64url. */
+async function nonceAleatorio(): Promise<string> {
+  const bytes = new Uint8Array(16);
+  await (await webCrypto()).getRandomValues(bytes);
+  return aBase64Url(bytes);
 }
 
 /**

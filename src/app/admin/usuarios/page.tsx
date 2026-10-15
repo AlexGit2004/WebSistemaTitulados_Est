@@ -22,7 +22,7 @@ interface Usuario {
   nombre: string;
   correo: string;
   ci: string | null;
-  rol: "admin" | "usuario";
+  rol: "admin" | "usuario" | "KARDEX";
   estado: "activo" | "inactivo" | "bloqueado";
   creadoEn: string;
   ultimoAcceso: string | null;
@@ -149,7 +149,7 @@ export default function AdminUsuariosPage() {
             </Link>
             <div>
               <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-                Usuarios administradores
+                Usuarios del sistema
               </h1>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 Acceso al sistema · Módulo 4.2 de la especificación
@@ -286,6 +286,7 @@ export default function AdminUsuariosPage() {
                   <select value={form.rol} onChange={(e) => setForm({ ...form, rol: e.target.value })} className={inp}>
                     <option value="admin">Administrador</option>
                     <option value="usuario">Usuario</option>
+                    <option value="KARDEX">Kardex · Revisión de solicitudes</option>
                   </select>
                 </label>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">

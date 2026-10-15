@@ -1,0 +1,97 @@
+services:
+  # ── Proxy Inverso Traefik ──────────────────────────────────────────────
+  traefik:
+    image: traefik:v2.11
+    container_name: sistitulados_proxy
+    restart: unless-stopped
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
+    networks:
+      - sistitulados_net
+
+  # ── Base de Datos PostgreSQL 16 (Alpine) ───────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: sistitulados_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-sistitulados_db}
+      POSTGRES_USER: ${DB_USER:-seguit_app}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-clave_segura_123}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-seguit_app} -d ${DB_NAME:-sistitulados_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
+    networks:
+      - sistitulados_net
+
+  # ── Aplicación Web Next.js (Alpine) ────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sistitulados_app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${DB_USER:-seguit_app}:${DB_PASSWORD:-clave_segura_123}@db:5432/${DB_NAME:-sistitulados_db}
+      SESSION_SECRET: ${SESSION_SECRET:-secreto_super_seguro_cambiar_en_produccion_64caracteres}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      SITIO_URL: ${SITIO_URL:-http://localhost:3000}
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-1x00000000000000000000AA}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-1x0000000000000000000000000000000AA}
+      TZ: America/La_Paz
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.app.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.app.entrypoints=web"
+      - "traefik.http.services.app.loadbalancer.server.port=3000"
+      - "traefik.http.middlewares.security-headers.headers.customresponseheaders.X-Frame-Options=DENY"
+      - "traefik.http.middlewares.security-headers.headers.customresponseheaders.X-Content-Type-Options=nosniff"
+      - "traefik.http.middlewares.security-headers.headers.customresponseheaders.X-XSS-Protection=1; mode=block"
+      - "traefik.http.middlewares.security-headers.headers.customresponseheaders.Referrer-Policy=strict-origin-when-cross-origin"
+      - "traefik.http.routers.app.middlewares=security-headers"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    networks:
+      - sistitulados_net
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  sistitulados_net:
+    driver: bridge

@@ -4,13 +4,28 @@ import { personas } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { errorInterno } from "@/lib/guards";
 import { registrarAuditoria } from "@/lib/auditoria";
-import { personaRegistroPublicoSchema, primerErrorZod } from "@/lib/validaciones";
+import {
+  personaRegistroPublicoSchema,
+  primerErrorZod,
+  type PersonaRegistroPublicoInput,
+} from "@/lib/validaciones";
 import { crearVerificacion } from "@/lib/verificacion";
 import { enviarCorreoVerificacion } from "@/lib/correo";
 import { registrarIntento, verificarLimite } from "@/lib/rateLimit";
 import { ipDesde } from "@/lib/auditoria";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * Separa los campos de consentimiento (transporte) de los que son columnas de `personas`.
+ *
+ * Sin esto, el `...datos` del INSERT arrastraría `consentimientoPrivacidad` y
+ * `versionAvisoPrivacidad`, que no existen en la tabla, y el INSERT fallaría.
+ */
+function sinConsentimiento(datos: PersonaRegistroPublicoInput) {
+  const { consentimientoPrivacidad: _c, versionAvisoPrivacidad: _v, ...persona } = datos;
+  return persona;
+}
 
 /**
  * POST /api/registro  ·  ALTA PÚBLICA (decisión D5, opción B)
@@ -67,8 +82,19 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Cédula ya existente ────────────────────────────────────────────────────
-    // Se responde IGUAL que en el caso exitoso a propósito: si se dijera "esa cédula ya
-    // está registrada", el endpoint serviría para averiguar quién está en el sistema.
+    // La respuesta debe ser INDISTINGUIBLE de la del alta nueva: mismo status (202), mismo
+    // cuerpo y ninguna clave extra. Si difiriera aunque sea en el status HTTP, el endpoint
+    // serviría para averiguar qué cédulas están en el sistema, que es justo lo que el
+    // comentario de arriba advertía. Quien ya está registrado se entera por su correo, que es
+    // el único canal que se controla: no se revela nada a quien solo tiene la cédula.
+    const RESPUESTA_NEUTRA = {
+      mensaje:
+        "Si los datos son correctos, se le enviará un correo para verificar. " +
+        "Si ya está registrado, revise su correo o contacte a la Carrera.",
+    };
+    const responderNeutro = () =>
+      NextResponse.json(RESPUESTA_NEUTRA, { status: 202 });
+
     const ci = datos.cedulaIdentidad.trim().toUpperCase();
     const existentes = await db
       .select({ id: personas.id, activo: personas.activo, estadoRegistro: personas.estadoRegistro })
@@ -78,14 +104,7 @@ export async function POST(req: NextRequest) {
 
     if (existentes.length) {
       registrarIntento(ip, "registro-publico");
-      return NextResponse.json(
-        {
-          mensaje:
-            "Si los datos son correctos, se le enviará un correo para verificar. " +
-            "Si ya está registrado, revise su correo o contacte a la Carrera.",
-        },
-        { status: 202 }
-      );
+      return responderNeutro();
     }
 
     // ── Crear el registro en estado PENDIENTE ───────────────────────────────────
@@ -94,13 +113,26 @@ export async function POST(req: NextRequest) {
         ? (datos.anioTitulacion - datos.anioEgreso) * 12
         : null;
 
+    // La fecha del consentimiento se toma AHORA, en el servidor, y no del cuerpo de la
+    // petición: un cliente podría mandar cualquier fecha y falsear la constancia que la
+    // Ley 1405 art. 5.1.b exige poder demostrar. El reloj del servidor es la única
+    // fuente fiable, igual que ya se hace con `creado_en`.
+    const consentimientoEn = new Date();
+
     const [creado] = await db
       .insert(personas)
       .values({
-        ...datos,
+        // El consentimiento NO se copia de `datos`: son campos de transporte (la
+        // casilla y la versión declarada por el cliente), no columnas. Lo que se guarda
+        // es la constancia server-side, con la fecha del servidor.
+        ...sinConsentimiento(datos),
         cedulaIdentidad: ci,
         activo: true,
         estadoRegistro: "PENDIENTE",
+        consentimientoOtorgado: true,
+        consentimientoOtorgadoEn: consentimientoEn,
+        consentimientoVersion: datos.versionAvisoPrivacidad,
+        consentimientoIp: ip,
         tiempoEgresoTitulacionMeses:
           tiempoEgresoTitulacionMeses !== null && tiempoEgresoTitulacionMeses >= 0
             ? tiempoEgresoTitulacionMeses
@@ -129,6 +161,17 @@ export async function POST(req: NextRequest) {
     });
 
     await registrarAuditoria({
+      accion: "consentimiento",
+      entidad: "personas",
+      entidadId: creado.id,
+      idUsuario: null,
+      detalles:
+        `Consentimiento al aviso de privacidad v${datos.versionAvisoPrivacidad} otorgado · ` +
+        `CI ${ci} · IP ${ip}`,
+      req,
+    });
+
+    await registrarAuditoria({
       accion: "crear",
       entidad: "personas",
       entidadId: creado.id,
@@ -137,18 +180,16 @@ export async function POST(req: NextRequest) {
       req,
     });
 
+    // Mismo status y mismo `mensaje` que la rama de cédula existente. Lo único que puede
+    // aparecer además es el enlace de verificación, y solo cuando se creó el registro y no
+    // hay SMTP configurado: en ese caso lo recibe quien controla el correo que acaba de
+    // escribir, no quien consulta una cédula ajena. `id` no se devuelve nunca.
     return NextResponse.json(
       {
-        mensaje:
-          "Registro creado. Revise su correo y siga el enlace para verificarlo; " +
-          "luego la Carrera de Estadística validará sus datos.",
-        id: creado.id,
-        // Sin SMTP configurado el correo no sale, así que el enlace se devuelve para que
-        // el flujo pueda probarse. En un despliegue real se elimina de la respuesta.
-        verificacionEnviada: envio.enviado,
+        ...RESPUESTA_NEUTRA,
         ...(envio.enviado ? {} : { enlaceVerificacion: `/verificar?token=${token}` }),
       },
-      { status: 201 }
+      { status: 202 }
     );
   } catch (e) {
     return errorInterno(e, "api/registro POST");

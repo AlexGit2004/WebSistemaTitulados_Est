@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
+import { aFiltroEnum } from "@/lib/filtros";
 import { personas } from "@/db/schema";
 import { and, eq, sql, type SQL } from "drizzle-orm";
-import { exigirAdmin, errorInterno } from "@/lib/guards";
+import { exigirAdmin, errorInterno, leerSesionVigente } from "@/lib/guards";
 import { registrarAuditoria } from "@/lib/auditoria";
+import { verificarDescarga } from "@/lib/descargas";
 import { generarReportePdf } from "@/lib/reportePdf";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +27,12 @@ export const runtime = "nodejs";
  *   vista=TITULADOS|EGRESADOS|COMPARATIVO
  *   sector, modalidad, anioMin, anioMax  → mismos filtros que el dashboard
  *   conDetalle=1                       → agrega la tabla de registros
+ *
+ * NOTA SOBRE PRIVACIDAD: este PDF es una descarga autenticada de la base completa y su
+ * destinatario es la Carrera, que es la finalidad declarada del sistema. A diferencia de
+ * `/api/dashboard`, que solo devuelve agregados, este documento incluye datos
+ * personales porque quien lo descarga tiene rol admin y necesita la base para acreditar.
+ * Lo que sí lleva es firma de descarga temporal (A.8.12) y registro en auditoría.
  */
 
 export async function GET(req: NextRequest) {
@@ -33,6 +41,37 @@ export async function GET(req: NextRequest) {
 
   try {
     const sp = new URL(req.url).searchParams;
+
+    // Firma de descarga: liga este archivo a esta sesión y a los próximos minutos.
+    const sesion = await leerSesionVigente(req);
+    if (!sesion) return NextResponse.json({ error: "Debe iniciar sesión" }, { status: 401 });
+
+    const firma = verificarDescarga(
+      "/api/exportar/pdf",
+      sp.get("sig"),
+      sp.get("exp") ? Number(sp.get("exp")) : null,
+      sp.get("sub"),
+      String(sesion.sub)
+    );
+    if (!firma.valida) {
+      await registrarAuditoria({
+        accion: "exportar",
+        entidad: "dashboard",
+        idUsuario: sesion.sub,
+        detalles: `PDF rechazado por firma inválida (motivo: ${firma.motivo})`,
+        req,
+      });
+      return NextResponse.json(
+        {
+          error:
+            firma.motivo === "expirada"
+              ? "El enlace de descarga expiró. Genere uno nuevo."
+              : "Enlace de descarga no válido.",
+          motivo: firma.motivo,
+        },
+        { status: 403 }
+      );
+    }
     const vista = (sp.get("vista") ?? "TITULADOS").toUpperCase();
     const conDetalle = sp.get("conDetalle") === "1";
 
@@ -46,10 +85,11 @@ export async function GET(req: NextRequest) {
       conds.push(eq(personas.activo, true), eq(personas.estadoRegistro, "VALIDADO"));
     }
     const sector = sp.get("sector");
-    if (sector && sector !== "TODOS") conds.push(eq(personas.sectorTrabajo, sector as any));
+    const sectorValido = aFiltroEnum(personas.sectorTrabajo, sector);
+    if (sectorValido) conds.push(eq(personas.sectorTrabajo, sectorValido));
     const modalidad = sp.get("modalidad");
-    if (modalidad && modalidad !== "TODAS")
-      conds.push(eq(personas.modalidadTitulacion, modalidad as any));
+    const modalidadValida = aFiltroEnum(personas.modalidadTitulacion, modalidad, "TODAS");
+    if (modalidadValida) conds.push(eq(personas.modalidadTitulacion, modalidadValida));
     const anioMin = sp.get("anioMin");
     if (anioMin)
       conds.push(sql`coalesce(${personas.anioTitulacion}, ${personas.anioEgreso}) >= ${parseInt(anioMin, 10)}`);
@@ -227,8 +267,9 @@ export async function GET(req: NextRequest) {
     const sello = new Date().toISOString().slice(0, 10);
 
     await registrarAuditoria({
-      accion: "exportar",
+   accion: "exportar",
       entidad: "dashboard",
+      idUsuario: sesion.sub,
       detalles: `Reporte PDF · ${vista} · detalle=${conDetalle ? "sí" : "no"} · ${(buffer.length / 1024).toFixed(0)} KB`,
       req,
     });

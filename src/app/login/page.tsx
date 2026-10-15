@@ -5,10 +5,12 @@ import { Suspense } from "react";
 import { useAuth } from "@/lib/auth";
 import { ShieldCheck, GraduationCap, BookOpen, LogIn, Info } from "lucide-react";
 import LoadingOverlay from "@/components/LoadingOverlay";
+import TurnstileWidget from "@/components/TurnstileWidget";
 
 function LoginForm() {
   const [ci, setCi] = useState("");
   const [password, setPassword] = useState("");
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
   const [logueando, setLogueando] = useState<string | null>(null);
@@ -25,6 +27,7 @@ function LoginForm() {
   const destinoPara = (rol: string): string => {
     if (origen) return origen;
     if (rol === "admin") return "/admin/dashboard";
+    if (rol === "KARDEX") return "/kardex/solicitudes";
     if (rol === "TITULADO") return "/portal/titulado";
     if (rol === "EGRESADO") return "/portal/egresado";
     return "/titulados";
@@ -38,7 +41,7 @@ function LoginForm() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ci: ci.trim(), password }),
+        body: JSON.stringify({ ci: ci.trim(), password, turnstileToken }),
       });
       const data = await res.json();
 
@@ -132,6 +135,15 @@ function LoginForm() {
                 {err}
               </div>
             )}
+
+            {/* Widget de protección anti-bots (Cloudflare Turnstile) */}
+            <div className="flex justify-center">
+              <TurnstileWidget
+                onSuccess={(token) => setTurnstileToken(token)}
+                onExpire={() => setTurnstileToken(null)}
+                onError={() => setTurnstileToken(null)}
+              />
+            </div>
 
             <button
               disabled={loading}

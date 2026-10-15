@@ -639,7 +639,7 @@ export default function AdminPersonasPage() {
                       value={txt(form, "cedulaIdentidad")}
                       onChange={(e) => set("cedulaIdentidad", e.target.value)}
                       className={inp}
-                      placeholder="1234567LP"
+                      placeholder="1234567"
                       // La CI es la llave única de todo el registro. Cambiarla dejaría
                       // huérfanas las sesiones ya abiertas, la auditoría y los reportes
                       // exportados, así que se congela al editar. Para corregir una CI

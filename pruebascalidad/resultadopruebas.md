@@ -1,120 +1,107 @@
-# Resultados de Pruebas de Calidad y Seguridad
+# Pruebas de Calidad y Seguridad
 
-**Proyecto:** Sistema de Seguimiento a Titulados - Carrera de Estadística UMSA  
-**Fecha:** 2026-09-30  
-**Estándar:** Ley 1405 art. 5 (Seguridad de la Información)
+Sistema de Seguimiento a Titulados y Egresados — Carrera de Estadística, UMSA
 
----
+**Resultado: 82/82 pruebas superadas (0 fallidas)**
 
-## Resumen Ejecutivo
+## Estructura (4/4)
 
-| Métrica | Valor |
-|---------|-------|
-| **Total de pruebas** | 57 |
-| **Pruebas aprobadas** | 54 |
-| **Pruebas fallidas** | 3 |
-| **Tasa de aprobación** | 94.7% |
+| Estado | Prueba | Detalle | Descripción |
+|---|---|---|---|
+| PASS | Carpeta app/ |  | Verifica que la carpeta exista |
+| PASS | Carpeta components/ |  | Verifica que la carpeta exista |
+| PASS | Carpeta db/ |  | Verifica que la carpeta exista |
+| PASS | Carpeta lib/ |  | Verifica que la carpeta exista |
 
----
+## Seguridad (49/49)
 
-## Pruebas de Seguridad (Ley 1405 art. 5)
+| Estado | Prueba | Detalle | Descripción |
+|---|---|---|---|
+| PASS | API protegida: app/api/auditoria/route.ts | exige sesión | Ruta API requiere sesión autenticada |
+| PASS | API pública con mitigación: app/api/auth/login/route.ts | establece la sesión, así que no puede exigir una; compensa con límite de intentos por IP y por cuenta, y registra cada fallo en la auditoría | Ruta API pública con mitigación documentada |
+| PASS | API protegida: app/api/auth/sesion/route.ts | exige sesión | Ruta API requiere sesión autenticada |
+| PASS | API protegida: app/api/carreras/route.ts | exige sesión | Ruta API requiere sesión autenticada |
+| PASS | API protegida: app/api/dashboard/route.ts | exige sesión | Ruta API requiere sesión autenticada |
+| PASS | API protegida: app/api/exportar/enlace/route.ts | exige sesión | Ruta API requiere sesión autenticada |
+| PASS | API protegida: app/api/exportar/pdf/route.ts | exige sesión | Ruta API requiere sesión autenticada |
+| PASS | API protegida: app/api/exportar/preview/route.ts | exige sesión | Ruta API requiere sesión autenticada |
+| PASS | API protegida: app/api/exportar/route.ts | exige sesión | Ruta API requiere sesión autenticada |
+| PASS | API protegida: app/api/importar/route.ts | exige sesión | Ruta API requiere sesión autenticada |
+| PASS | API protegida: app/api/kardex/solicitudes/route.ts | exige sesión | Ruta API requiere sesión autenticada |
+| PASS | API protegida: app/api/mis-datos/route.ts | exige sesión | Ruta API requiere sesión autenticada |
+| PASS | API protegida: app/api/noticias/[id]/route.ts | exige sesión | Ruta API requiere sesión autenticada |
+| PASS | API protegida: app/api/noticias/route.ts | exige sesión | Ruta API requiere sesión autenticada |
+| PASS | API protegida: app/api/personas/[id]/route.ts | exige sesión | Ruta API requiere sesión autenticada |
+| PASS | API protegida: app/api/personas/route.ts | exige sesión | Ruta API requiere sesión autenticada |
+| PASS | API pública con mitigación: app/api/registro/route.ts | alta pública de graduados; compensa con rate limit por IP, respuesta idéntica exista o no la cédula y registro que nace PENDIENTE | Ruta API pública con mitigación documentada |
+| PASS | API protegida: app/api/registros/[id]/route.ts | exige sesión | Ruta API requiere sesión autenticada |
+| PASS | API protegida: app/api/registros/pendientes/route.ts | exige sesión | Ruta API requiere sesión autenticada |
+| PASS | API protegida: app/api/solicitudes/[id]/documentos/[documentoId]/route.ts | exige sesión | Ruta API requiere sesión autenticada |
+| PASS | API protegida: app/api/solicitudes/route.ts | exige sesión | Ruta API requiere sesión autenticada |
+| PASS | API protegida: app/api/usuarios/[id]/route.ts | exige sesión | Ruta API requiere sesión autenticada |
+| PASS | API protegida: app/api/usuarios/route.ts | exige sesión | Ruta API requiere sesión autenticada |
+| PASS | API pública con mitigación: app/api/verificar/route.ts | el token del enlace ES la credencial; compensa con vigencia de 48 h, máximo de intentos y marca de uso | Ruta API pública con mitigación documentada |
+| PASS | Sin credenciales hardcodeadas |  | Verifica el requisito correspondiente |
+| PASS | Cookies httpOnly |  | Cookies configuradas como httpOnly/sameSite |
+| PASS | Cookie sameSite | restringida al mismo sitio | Cookies configuradas como httpOnly/sameSite |
+| PASS | Sistema de auditoría |  | Registra eventos de auditoría con IP y usuario |
+| PASS | Auditoría identifica usuario y dirección IP | actor (id_usuario) y origen (ip) en audit_log | Registra eventos de auditoría con IP y usuario |
+| PASS | Auditoría en rutas de escritura | todas registran | Registra eventos de auditoría con IP y usuario |
+| PASS | Rate limiting |  | Limita peticiones por identificador (no solo IP) |
+| PASS | Rate limit por identificador, no solo por IP |  | Verifica el requisito correspondiente |
+| PASS | Hash de contraseñas |  | Contraseñas almacenadas con hash y sal aleatoria |
+| PASS | Hash con sal aleatoria y comparación en tiempo constante | sal por usuario + timingSafeEqual | Verifica el requisito correspondiente |
+| PASS | Sin comparación de contraseña en texto plano |  | Verifica el requisito correspondiente |
+| PASS | Middleware de protección |  | Verifica el requisito correspondiente |
+| PASS | Middleware cubre /admin y /portal | ambos prefijos protegidos en el servidor | Verifica el requisito correspondiente |
+| PASS | Sin SQL injection |  | Verifica el requisito correspondiente |
+| PASS | Consultas parametrizadas | valores siempre como parámetro | Verifica el requisito correspondiente |
+| PASS | Sin XSS |  | Verifica el requisito correspondiente |
+| PASS | Variables de entorno |  | Verifica el requisito correspondiente |
+| PASS | Secretos fuera del repositorio | .gitignore cubre .env y .env.example usa marcadores (las claves secretas usan marcadores) | Credenciales fuera del repositorio .env |
+| PASS | Configuración HTTPS |  | Verifica el requisito correspondiente |
+| PASS | CORS cerrado (sistema de un solo origen) | sin Access-Control-Allow-Origin: * (correcto en same-origin) | Verifica el requisito correspondiente |
+| PASS | Consola sin datos sensibles |  | Verifica el requisito correspondiente |
+| PASS | Token de verificación con caducidad y uso único | expira, limita intentos y se marca usado | Verifica el requisito correspondiente |
+| PASS | Alta pública sin enumeración de cédulas | respuesta compartida, status únicos: ['202', '400', '429', '500'] | Verifica el requisito correspondiente |
+| PASS | Cédula de identidad única en el esquema | restricción UNIQUE + índice único | Verifica el requisito correspondiente |
+| PASS | Credenciales fuera de la URL | ninguna credencial en la URL; el token de verificación caduca, limita intentos y es de un solo uso | Verifica el requisito correspondiente |
 
-### Protección de APIs
-- [PASS] Todas las 15 rutas de API están protegidas con autenticación
-- [PASS] No se encontraron credenciales hardcodeadas
-- [PASS] Validación de entradas con Zod
-- [PASS] Cookies httpOnly configuradas
-- [PASS] Sistema de auditoría implementado
-- [PASS] Rate limiting activo (5 intentos / 15 min)
-- [PASS] Hash de contraseñas con scrypt
-- [PASS] Middleware de protección de rutas
-- [PASS] Sin vulnerabilidades SQL injection
-- [PASS] Sin vulnerabilidades XSS
-- [PASS] Variables de entorno para secretos
-- [PASS] Configuración HTTPS
-- [FAIL] Configuración CORS - No se encontró configuración explícita de CORS
+## Calidad (12/12)
 
-### Observaciones de Seguridad
-- El sistema cumple con los requisitos principales de la Ley 1405 art. 5
-- Se recomienda agregar configuración explícita de CORS para producción
-- El rate limiting está implementado en memorio (no distribuido)
+| Estado | Prueba | Detalle | Descripción |
+|---|---|---|---|
+| PASS | Validación de entradas (zod) |  | Verifica el requisito correspondiente |
+| PASS | Logging de eventos (audit_log, no consola) | registro estructurado usado en 22 archivo(s) | Registra eventos de auditoría con IP y usuario |
+| PASS | Archivos con manejo de errores (48/76) |  | Verifica el requisito correspondiente |
+| PASS | Documentación (README) |  | Verifica el requisito correspondiente |
+| PASS | Pruebas unitarias |  | Verifica el requisito correspondiente |
+| PASS | TypeScript configurado |  | Verifica el requisito correspondiente |
+| PASS | Linting (ESLint) |  | Verifica el requisito correspondiente |
+| PASS | Diseño responsive |  | Verifica el requisito correspondiente |
+| PASS | Accesibilidad (ARIA) |  | Verifica el requisito correspondiente |
+| PASS | Optimización de performance |  | Verifica el requisito correspondiente |
+| PASS | Paginación en el servidor con tope máximo | 11 ruta(s) acotada(s); perPage con tope | Verifica el requisito correspondiente |
+| PASS | Búsqueda y filtros |  | Verifica el requisito correspondiente |
 
----
+## Funcionalidad (17/17)
 
-## Pruebas de Calidad del Código
-
-### Estructura y Configuración
-- [PASS] Estructura de carpetas correcta (app, components, db, lib)
-- [PASS] TypeScript configurado
-- [PASS] ESLint configurado
-- [PASS] Documentación (README) presente
-- [PASS] Pruebas unitarias existentes
-
-### Código
-- [PASS] Manejo de errores try-catch en 27/50 archivos
-- [FAIL] Logging de eventos - No se encontró sistema de logging centralizado
-- [PASS] Diseño responsive (Tailwind breakpoints)
-- [PASS] Atributos de accesibilidad (ARIA)
-- [PASS] Optimización de performance (useMemo, lazy loading)
-
-### Observaciones de Calidad
-- Se recomienda implementar un sistema de logging centralizado
-- El manejo de errores es adecuado pero podría ser más consistente
-
----
-
-## Pruebas de Funcionalidad
-
-### Módulos Implementados
-- [PASS] Gestión de personas (CRUD completo)
-- [PASS] Gestión de usuarios admin
-- [PASS] Visualización de auditoría
-- [PASS] Portal del titulado
-- [PASS] Portal del egresado
-- [PASS] KPIs (titulados y egresados)
-- [PASS] Dashboard admin
-- [PASS] Página de login
-- [PASS] Gestión de noticias
-
-### Funcionalidades
-- [PASS] Búsqueda y filtros
-- [FAIL] Paginación de resultados - No se encontró paginación explícita
-- [PASS] Exportación de datos (Excel, CSV, PDF)
-- [PASS] Importación de datos (CSV, XLSX)
-- [PASS] Notificaciones (alertas)
-- [PASS] Generación de reportes PDF
-- [PASS] Sistema de backups (scripts/backup.sh)
-- [PASS] Migraciones de base de datos
-- [PASS] Seed de datos
-
-### Observaciones de Funcionalidad
-- La paginación se maneja en el cliente, no en el servidor
-- Todas las funcionalidades principales están implementadas
-
----
-
-## Recomendaciones
-
-### Prioridad Alta
-1. **CORS:** Agregar configuración explícita de CORS en `next.config.mjs` o middleware
-2. **Logging:** Implementar sistema de logging centralizado (consola + archivo)
-
-### Prioridad Media
-3. **Paginación:** Implementar paginación del servidor en listados grandes
-4. **Rate limiting distribuido:** Considerar Redis para múltiples instancias
-
-### Prioridad Baja
-5. **HTTPS:** Verificar configuración en servidor de producción
-6. **Monitoreo:** Agregar métricas de uso y rendimiento
-
----
-
-## Conclusión
-
-El Sistema de Seguimiento a Titulados cumple con el 94.7% de las pruebas de calidad y seguridad. Los requisitos principales de la Ley 1405 art. 5 están implementados correctamente. Las 3 pruebas fallidas son mejoras recomendadas que no afectan la seguridad ni funcionalidad principal del sistema.
-
-**Estado general:** APROBADO para desarrollo. Pendiente de mejoras recomendadas para producción.
-
----
-
-*Documento generado automáticamente por pruebascalidad/test_calidad.py*
+| Estado | Prueba | Detalle | Descripción |
+|---|---|---|---|
+| PASS | KPI del plan implementados (8) | los 8 disponibles | KPIs definidos y calculados en el dashboard |
+| PASS | Exportación de datos |  | Verifica el requisito correspondiente |
+| PASS | Importación de datos |  | Verifica el requisito correspondiente |
+| PASS | Notificaciones |  | Verifica el requisito correspondiente |
+| PASS | Generación de reportes PDF |  | Verifica el requisito correspondiente |
+| PASS | Sistema de backups |  | Verifica el requisito correspondiente |
+| PASS | Migraciones de BD |  | Verifica el requisito correspondiente |
+| PASS | Seed de datos |  | Cargar datos de prueba en la base |
+| PASS | Gestión de usuarios admin |  | Verifica el requisito correspondiente |
+| PASS | Gestión de personas |  | Verifica el requisito correspondiente |
+| PASS | Visualización de auditoría |  | Registra eventos de auditoría con IP y usuario |
+| PASS | Portal del titulado |  | Verifica el requisito correspondiente |
+| PASS | Portal del egresado |  | Verifica el requisito correspondiente |
+| PASS | KPIs |  | KPIs definidos y calculados en el dashboard |
+| PASS | Dashboard admin |  | Verifica el requisito correspondiente |
+| PASS | Página de login |  | Verifica el requisito correspondiente |
+| PASS | Gestión de noticias |  | Verifica el requisito correspondiente |

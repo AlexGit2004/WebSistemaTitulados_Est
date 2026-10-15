@@ -42,6 +42,22 @@ export async function exigirAdmin(
   return null;
 }
 
+export async function exigirKardex(
+  req: Parameters<typeof leerSesionDeRequest>[0]
+): Promise<NextResponse | null> {
+  const sesion = await leerSesionVigente(req);
+  if (!sesion) {
+    await registrarAccesoDenegado(req, "sin sesión válida para Kardex");
+    return NextResponse.json({ error: "Debe iniciar sesión" }, { status: 401 });
+  }
+  if (sesion.rol !== "KARDEX") {
+    const idUsuario = sesion.rol === "admin" ? sesion.sub : null;
+    await registrarAccesoDenegado(req, `rol ${sesion.rol} intentó usar el visor Kardex`, idUsuario);
+    return NextResponse.json({ error: "Requiere permisos de Kardex" }, { status: 403 });
+  }
+  return null;
+}
+
 /**
  * Segunda capa de la revocación (decisión D2).
  *

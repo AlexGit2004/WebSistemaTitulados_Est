@@ -16,13 +16,20 @@ import { GraduationCap, Loader2, AlertTriangle, CheckCircle2 } from "lucide-reac
  */
 
 type Resultado =
-  | { estado: "enviado"; mensaje: string; verificacionEnviada: boolean }
+  | { estado: "enviado"; mensaje: string; enlaceDevuelto: boolean }
   | { estado: "error"; mensaje: string; campos?: Record<string, string[]> };
 
 const inp =
   "w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5 text-sm text-[var(--fg)] outline-none focus:ring-2 focus:ring-blue-600/40";
 
 const err = "mt-1 text-xs font-semibold text-red-600";
+
+/**
+ * Versión del aviso de privacidad. Debe coincidir con `VERSION_AVISO_PRIVACIDAD` en
+ * `lib/validaciones.ts`: el servidor rechaza el registro si no coinciden, para que nadie
+ * acepte un aviso distinto del que se le mostró.
+ */
+const VERSION_AVISO = "1.0.0";
 
 export default function PaginaRegistro() {
   const [f, setF] = useState({
@@ -42,6 +49,7 @@ export default function PaginaRegistro() {
   const [inicioProceso, setInicioProceso] = useState("");
   const [motivo, setMotivo] = useState("");
   const [enviando, setEnviando] = useState(false);
+  const [acepta, setAcepta] = useState(false);
   const [r, setR] = useState<Resultado | null>(null);
 
   useEffect(() => {
@@ -59,6 +67,16 @@ export default function PaginaRegistro() {
 
   async function enviar(e: React.FormEvent) {
     e.preventDefault();
+    // Guarda frente a un envío con Enter desde cualquier campo, que es la forma
+    // habitual de saltarse la casilla si el botón está deshabilitado pero no bloqueado.
+    if (!acepta) {
+      setR({
+        estado: "error",
+        mensaje: "Debe leer y aceptar el aviso de privacidad para enviar la solicitud.",
+        campos: { consentimientoPrivacidad: ["Obligatorio"] },
+      });
+      return;
+    }
     setEnviando(true);
     setR(null);
 
@@ -87,6 +105,13 @@ export default function PaginaRegistro() {
       if (pideMotivo && motivo) cuerpo.motivoNoTitulacion = motivo;
     }
 
+    // Consentimiento: viaja como `true` literal y con la versión del aviso mostrado. El
+    // servidor no guarda este valor tal cual, sino la constancia (fecha del servidor +
+    // versión), pero lo exige para poder rechazar un envío sin consentimiento aunque la
+    // validación del cliente se hubiera saltado.
+    cuerpo.consentimientoPrivacidad = true;
+    cuerpo.versionAvisoPrivacidad = VERSION_AVISO;
+
     try {
       const res = await fetch("/api/registro", {
         method: "POST",
@@ -99,7 +124,11 @@ export default function PaginaRegistro() {
         setR({
           estado: "enviado",
           mensaje: data.mensaje ?? "Su solicitud fue registrada.",
-          verificacionEnviada: Boolean(data.verificacionEnviada),
+          // La API responde igual exista o no la cédula, para no permitir enumerar quién
+          // está en el sistema. Solo cuando el registro se acaba de crear y no hay SMTP, la
+          // respuesta trae el enlace de verificación; ese es el único caso en el que esta
+          // nota del servidor corresponde mostrarse.
+          enlaceDevuelto: Boolean(data.enlaceVerificacion),
         });
       } else {
         setR({ estado: "error", mensaje: data.error ?? "No se pudo enviar la solicitud.", campos: data.campos });
@@ -134,6 +163,73 @@ export default function PaginaRegistro() {
           </p>
         </div>
 
+        {/* ── Aviso de privacidad (ISO/IEC 27701:2025 · Ley 1405 art. 5) ────────
+            Va ANTES de los campos y no en un enlace aparte: el aviso de privacidad
+            solo informa si se lee antes de entregar los datos. El enlace legal
+            completo puede estar al final, pero no puede sustituir a esto. */}
+        <section
+          aria-labelledby="aviso-titulo"
+          className="rounded-2xl border border-blue-200 dark:border-blue-900 bg-blue-50/50 dark:bg-blue-950/30 p-6 mb-4 text-sm leading-relaxed"
+        >
+          <h2 id="aviso-titulo" className="font-black text-base mb-3">
+            Aviso de privacidad y consentimiento
+          </h2>
+          <dl className="space-y-2.5">
+            <div>
+              <dt className="font-bold inline">Responsable del tratamiento:</dt>{" "}
+              <dd className="inline">
+                Carrera de Estadística, Facultad de Ciencias, Universidad Mayor de San Andrés.
+              </dd>
+            </div>
+            <div>
+              <dt className="font-bold inline">Datos que se recogen:</dt>{" "}
+              <dd className="inline">
+                nombre, cédula de identidad, género, correo, teléfono, semestre y año de
+                ingreso/egreso, situación de titulación, situación laboral, sector, ocupación
+                y ciudad donde trabaja. No se recoge información distinta de la necesaria para
+                los fines indicados.
+              </dd>
+            </div>
+            <div>
+              <dt className="font-bold inline">Finalidad del tratamiento:</dt>{" "}
+              <dd className="inline">
+                mantener el registro institucional de titulados y egresados, elaborar las
+                estadísticas de empleabilidad e inserción laboral de la carrera y mantenerle
+                informada sobre actividades de la carrera. Los datos <strong>no</strong> se
+                ceden a terceros ni se usan con fines ajenos a estos.
+              </dd>
+            </div>
+            <div>
+              <dt className="font-bold inline">Base jurídica:</dt>{" "}
+              <dd className="inline">
+                su consentimiento expreso, que es la causa que legitimiza el tratamiento.
+                Puede revocarlo en cualquier momento desde el portal o escribiendo a la
+                Carrera.
+              </dd>
+            </div>
+            <div>
+              <dt className="font-bold inline">Conservación:</dt>{" "}
+              <dd className="inline">
+                mientras figure en el registro institucional de la carrera. Los indicadores
+                estadísticos que se publican no identifican personas: los grupos de menos de
+                5 egresados no se publican.
+              </dd>
+            </div>
+            <div>
+              <dt className="font-bold inline">Sus derechos:</dt>{" "}
+              <dd className="inline">
+                puede acceder a sus datos, corregirlos, obtener una copia y pedir su
+                eliminación escribiendo a la Carrera o desde su cuenta del portal. Puede
+                retirar el consentimiento en cualquier momento, sin efectos retroactivos.
+              </dd>
+            </div>
+          </dl>
+          <p className="mt-3 text-xs text-[var(--muted)]">
+            Versión del aviso: {VERSION_AVISO}. Al enviar este formulario se registra su
+            aceptación junto con la fecha, la hora y la dirección IP desde la que se envía.
+          </p>
+        </section>
+
         {r?.estado === "enviado" && (
           <div className="rounded-2xl border border-emerald-300 bg-emerald-50 p-5 mb-6">
             <div className="flex items-center gap-2 text-emerald-700 mb-2">
@@ -141,12 +237,12 @@ export default function PaginaRegistro() {
               <h2 className="font-bold">Solicitud recibida</h2>
             </div>
             <p className="text-sm text-emerald-900">{r.mensaje}</p>
-            {!r.verificacionEnviada && (
+            {r.enlaceDevuelto && (
               <p className="text-xs text-emerald-800 mt-3">
                 <strong>Nota del servidor:</strong> no hay servicio de correo configurado en
-                esta instalación, así que el enlace de verificación se imprimió en la
-                consola del servidor. El flujo completo queda probado, pero falta configurar
-                el SMTP para que el correo llegue solo.
+                esta instalación, así que el enlace de verificación se devolvió en la respuesta
+                y quedó registrado en la consola del servidor. El flujo completo queda probado,
+                pero falta configurar el SMTP para que el correo llegue solo.
               </p>
             )}
           </div>
@@ -182,7 +278,7 @@ export default function PaginaRegistro() {
           <div className="grid sm:grid-cols-2 gap-4">
             <label className="block">
               <span className="text-xs font-bold uppercase tracking-wide">Cédula de identidad *</span>
-              <input required placeholder="1234567 LP" className={inp} value={f.cedulaIdentidad} onChange={(e) => set("cedulaIdentidad", e.target.value)} />
+              <input required placeholder="1234567" className={inp} value={f.cedulaIdentidad} onChange={(e) => set("cedulaIdentidad", e.target.value)} />
             </label>
             <label className="block">
               <span className="text-xs font-bold uppercase tracking-wide">Correo electrónico *</span>
@@ -292,9 +388,32 @@ export default function PaginaRegistro() {
             </>
           )}
 
+          <label
+            className="flex items-start gap-3 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-4 cursor-pointer"
+          >
+            <input
+              type="checkbox"
+              required
+              checked={acepta}
+              onChange={(e) => setAcepta(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-blue-800"
+            />
+            <span className="text-xs leading-relaxed">
+              He leído el{" "}
+              <strong className="font-bold">aviso de privacidad</strong> y acepto el
+              tratamiento de mis datos para los fines indicados en él. Entiendo que puedo
+              retirar este consentimiento en cualquier momento.
+              {r?.estado === "error" && r.campos?.consentimientoPrivacidad && (
+                <span className="block mt-1 font-semibold text-red-600">
+                  {r.campos.consentimientoPrivacidad.join(", ")}
+                </span>
+              )}
+            </span>
+          </label>
+
           <button
             type="submit"
-            disabled={enviando}
+            disabled={enviando || !acepta}
             className="w-full sm:w-auto px-6 py-3 rounded-xl font-black uppercase tracking-wide text-white bg-[var(--nav-bg)] hover:opacity-90 disabled:opacity-60 transition inline-flex items-center justify-center gap-2"
           >
             {enviando ? <Loader2 className="w-4 h-4 animate-spin" /> : null}

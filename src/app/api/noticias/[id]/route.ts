@@ -5,6 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { exigirAdmin, errorInterno } from "@/lib/guards";
 import { leerSesionDeRequest } from "@/lib/sesion";
 import { registrarAuditoria } from "@/lib/auditoria";
+import { noticiaActualizacionSchema, primerErrorZod } from "@/lib/validaciones";
 
 export const dynamic = "force-dynamic";
 
@@ -47,39 +48,31 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const denegado = await exigirAdmin(req);
   if (denegado) return denegado;
 
-  let body: any;
+  let crudo: unknown;
   try {
-    body = await req.json();
+    crudo = await req.json();
   } catch {
     return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
   }
 
+  // La edición acepta un subconjunto del alta, pero con las MISMAS reglas de tipo y
+  // longitud. Antes cada campo se validaba a mano y un campo desconocido pasaba
+  // silenciosamente; el esquema `.strict()` lo rechaza.
+  const check = noticiaActualizacionSchema.safeParse(crudo);
+  if (!check.success) {
+    return NextResponse.json(
+      { error: primerErrorZod(check.error), campos: check.error.flatten().fieldErrors },
+      { status: 400 }
+    );
+  }
+  const body = check.data as Record<string, unknown>;
+
   const patch: Partial<NuevaNoticiaCurso> = {};
-  if (body.titulo !== undefined) {
-    if (String(body.titulo).trim().length === 0)
-      return NextResponse.json({ error: "El título es obligatorio" }, { status: 400 });
-    patch.titulo = String(body.titulo).trim();
-  }
-  if (body.cuerpo !== undefined) {
-    if (String(body.cuerpo).trim().length === 0)
-      return NextResponse.json({ error: "La descripción es obligatoria" }, { status: 400 });
-    patch.cuerpo = String(body.cuerpo).trim();
-  }
-  if (body.tipo !== undefined) {
-    if (!TIPOS.includes(body.tipo))
-      return NextResponse.json({ error: "Tipo inválido" }, { status: 400 });
-    patch.tipo = body.tipo;
-  }
-  if (body.categoria !== undefined) {
-    if (!CATEGORIAS.includes(body.categoria))
-      return NextResponse.json({ error: "Categoría inválida" }, { status: 400 });
-    patch.categoria = body.categoria;
-  }
-  if (body.fecha !== undefined) {
-    if (Number.isNaN(new Date(body.fecha).getTime()))
-      return NextResponse.json({ error: "Fecha inválida" }, { status: 400 });
-    patch.fecha = body.fecha;
-  }
+  if (typeof body.titulo === "string") patch.titulo = body.titulo;
+  if (typeof body.cuerpo === "string") patch.cuerpo = body.cuerpo;
+  if (typeof body.tipo === "string") patch.tipo = body.tipo as NuevaNoticiaCurso["tipo"];
+  if (typeof body.categoria === "string") patch.categoria = body.categoria as NuevaNoticiaCurso["categoria"];
+  if (typeof body.fecha === "string") patch.fecha = body.fecha;
   if (body.imagenUrl !== undefined) patch.imagenUrl = String(body.imagenUrl).trim() || null;
   if (body.publicado !== undefined) patch.publicado = body.publicado === true;
   if (!Object.keys(patch).length)

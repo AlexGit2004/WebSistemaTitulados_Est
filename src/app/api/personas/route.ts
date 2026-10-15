@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
+import { aFiltroEnum, aValorEnum } from "@/lib/filtros";
 import { personas } from "@/db/schema";
 import { and, count, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import { exigirAdmin, exigirAdminOContacto, errorInterno } from "@/lib/guards";
@@ -85,14 +86,16 @@ export async function GET(req: NextRequest) {
     if (tipo === "TITULADO" || tipo === "EGRESADO") conds.push(eq(personas.tipo, tipo));
 
     const sector = sp.get("sector");
-    if (sector && sector !== "TODOS") conds.push(eq(personas.sectorTrabajo, sector as any));
+    const sectorValido = aFiltroEnum(personas.sectorTrabajo, sector);
+    if (sectorValido) conds.push(eq(personas.sectorTrabajo, sectorValido));
 
     const estado = sp.get("estado");
-    if (estado && estado !== "TODOS") conds.push(eq(personas.estadoLaboral, estado as any));
+    const estadoValido = aFiltroEnum(personas.estadoLaboral, estado);
+    if (estadoValido) conds.push(eq(personas.estadoLaboral, estadoValido));
 
     const modalidad = sp.get("modalidad");
     if (modalidad && modalidad !== "TODAS")
-      conds.push(eq(personas.modalidadTitulacion, modalidad as any));
+      conds.push(eq(personas.modalidadTitulacion, aFiltroEnum(personas.modalidadTitulacion, modalidad, "TODAS")!));
 
     const anioMin = sp.get("anioMin");
     if (anioMin)
@@ -282,6 +285,13 @@ export async function PATCH(req: NextRequest) {
 
     const anterior = actual[0]!;
 
+    /**
+     * Consentimiento acceptance (auto-fill, server-controlled). Only set on the
+     * self-service branch and never comes from the request body as a mutable value:
+     * the server stamps the date and records the accepted text version.
+     */
+    let patchConsentimiento: Record<string, unknown> = {};
+
     // El titular no puede tocar campos K ni cambiar su tipo.
     const CAMPOS_AUTOGESTION = [
       "correoElectronico",
@@ -295,6 +305,9 @@ export async function PATCH(req: NextRequest) {
       "trabajaEnEstadistica",
       "tiempoInsercionLaboralMeses",
       "observaciones",
+      "nivelEstudio",
+      "realizoCursoUltimos3Anos",
+      "ultimoCurso",
       "planeaTitularse",
       "inicioProcesoTitulacion",
       "motivoNoTitulacion",
@@ -331,9 +344,15 @@ export async function PATCH(req: NextRequest) {
       // Para el titular: esquema estricto sobre SOLO los campos permitidos. Si se envió
       // algún campo de Kardex, `permitido` ya lo eliminó, así que aquí se valida el perfil
       // dinámico completo y se descarta lo que no cuadre.
-      const soloDinamicos = Object.fromEntries(
-        CAMPOS_AUTOGESTION.filter((k) => body[k] !== undefined).map((k) => [k, body[k]])
-      );
+      const soloDinamicos = {
+        ...Object.fromEntries(
+          CAMPOS_AUTOGESTION.filter((k) => body[k] !== undefined).map((k) => [k, body[k]])
+        ),
+        // El consentimiento viaja en el cuerpo validado: si falta o no vale `true`, el
+        // esquema lo rechaza aquí, antes de tocar la base de datos.
+        consentimientoPrivacidad: body.consentimientoPrivacidad,
+        versionAvisoPrivacidad: body.versionAvisoPrivacidad,
+      };
       if (Object.keys(soloDinamicos).length) {
         const check = personaAutogestionSchema.safeParse(soloDinamicos);
         if (!check.success) {
@@ -343,6 +362,35 @@ export async function PATCH(req: NextRequest) {
           );
         }
       }
+
+      // Consentimiento en la autogestión: se comprueba AQUÍ, en el servidor.
+      //
+      // Validarlo solo en el formulario significaría que basta con un `fetch` a mano
+      // para guardar datos sin haber aceptado el aviso. El titular es quien autoriza
+      // el tratamiento de sus propios datos, así que su aceptación tiene que ser
+      // demostrable: se guarda la fecha y la versión exacta del texto aceptado.
+      const acepta = body.consentimientoPrivacidad === true;
+      const version = typeof body.versionAvisoPrivacidad === "string" ? body.versionAvisoPrivacidad.trim() : "";
+      if (!acepta) {
+        return NextResponse.json(
+          {
+            error: "Debe aceptar el aviso de privacidad para guardar sus datos",
+            campos: { consentimientoPrivacidad: ["Debe aceptar el aviso de privacidad"] },
+          },
+          { status: 400 }
+        );
+      }
+      if (!version) {
+        return NextResponse.json(
+          { error: "Falta la versión del aviso aceptado", campos: { versionAvisoPrivacidad: ["Obligatorio"] } },
+          { status: 400 }
+        );
+      }
+      patchConsentimiento = {
+        consentimientoOtorgado: true,
+        consentimientoOtorgadoEn: new Date(),
+        consentimientoVersion: version,
+      };
     }
 
     const patch: Record<string, unknown> = {};
@@ -386,6 +434,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     patch.actualizadoEn = new Date();
+    Object.assign(patch, patchConsentimiento);
 
     const [actualizada] = await db
       .update(personas)

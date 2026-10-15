@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { auditLog, usuarios } from "@/db/schema";
 import { desc, eq, sql } from "drizzle-orm";
 import { exigirAdmin, errorInterno } from "@/lib/guards";
+import { aFiltroEnum } from "@/lib/filtros";
 
 export const dynamic = "force-dynamic";
 
@@ -31,18 +32,23 @@ export async function GET(req: NextRequest) {
     }
 
     const where = [];
-    if (accion && accion !== "TODOS") where.push(eq(auditLog.accion, accion as any));
+    // La acción se normaliza contra el ENUM de la columna: un valor inventado se
+    // descarta en lugar de llegar a PostgreSQL y devolver un 500.
+    const accionValida = aFiltroEnum(auditLog.accion, accion);
+    if (accionValida) where.push(eq(auditLog.accion, accionValida));
 
     const entidad = sp.get("entidad");
     if (entidad && entidad !== "TODAS") where.push(eq(auditLog.entidad, entidad));
 
     const usuarioId = sp.get("usuarioId");
-    if (usuarioId && usuarioId !== "TODOS") where.push(eq(auditLog.idUsuario, parseInt(usuarioId, 10)));
+    if (usuarioId && usuarioId !== "TODOS")
+      where.push(eq(auditLog.idUsuario, parseInt(usuarioId, 10)));
 
     const desde = sp.get("desde");
     if (desde && !Number.isNaN(Date.parse(desde))) {
       where.push(sql`${auditLog.creadoEn} >= ${new Date(desde)}`);
     }
+
     const hasta = sp.get("hasta");
     if (hasta && !Number.isNaN(Date.parse(hasta))) {
       // Incluir todo el día final.
@@ -56,10 +62,10 @@ export async function GET(req: NextRequest) {
     const pagina = Math.max(1, parseInt(sp.get("page") ?? "1", 10) || 1);
     const perPage = Math.min(200, Math.max(10, parseInt(sp.get("perPage") ?? "50", 10) || 50));
 
-    const [{ total }] = await db
+    const [{ total }] = (await db
       .select({ total: sql<number>`count(*)::int` })
       .from(auditLog)
-      .where(cond);
+      .where(cond)) as [{ total: number }];
 
     const filas = await db
       .select({

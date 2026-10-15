@@ -57,7 +57,7 @@ export function verifyPassword(password: string, stored: string): boolean {
   }
 }
 
-/** Normaliza una CI para poder compararla sin depender del formato. */
+/** Normaliza una CI a su forma numérica para compararla sin depender del formato. */
 export function normalizarCi(ci: string): string {
-  return (ci ?? "").trim().toUpperCase().replace(/\s+/g, "");
+  return (ci ?? "").replace(/[^0-9]/g, "");
 }

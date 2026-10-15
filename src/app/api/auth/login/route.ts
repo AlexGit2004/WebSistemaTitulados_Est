@@ -11,6 +11,7 @@ import { errorInterno } from "@/lib/guards";
 import { verificarLimite, registrarIntento, limpiarIntentos } from "@/lib/rateLimit";
 import { registrarSesion } from "@/lib/sesiones";
 import { DURACION_SESION_MS } from "@/lib/sesion";
+import { verificarTurnstile } from "@/lib/turnstile";
 
 export const dynamic = "force-dynamic";
 
@@ -31,12 +32,18 @@ export async function POST(req: NextRequest) {
 
     const entrada = parseo.data.ci.trim().toUpperCase();
     const password = parseo.data.password ?? "";
+    const turnstileToken = parseo.data.turnstileToken;
     const cookieStore = await cookies(); // Obtenemos el almacén de cookies de forma asíncrona
 
-    // ── Límite de intentos (fuerza bruta) ─────────────────────────────────────
-    // Se cuenta por IP y por identificador: atacar una cuenta desde muchas máquinas
-    // tampoco sirve, porque el contador por identificador también se agota.
+    // ── Validación de Cloudflare Turnstile (Anti-bots) ─────────────────────────
     const ip = ipDesde(req) ?? "desconocida";
+    const verif = await verificarTurnstile(turnstileToken, ip);
+    if (!verif.valido) {
+      return NextResponse.json(
+        { error: verif.motivo || "Verificación de seguridad fallida. Por favor, intente nuevamente." },
+        { status: 403 }
+      );
+    }
     const limite = verificarLimite(ip, entrada);
 
     if (!limite.permitido) {
@@ -86,12 +93,16 @@ export async function POST(req: NextRequest) {
         return await fallo(`Intento de acceso fallido al administrador ${u.correo}`);
       }
 
+      if (u.rol !== "admin" && u.rol !== "KARDEX") {
+        return await fallo(`Intento de acceso con rol no habilitado ${u.rol}`);
+      }
+
       limpiarIntentos(ip, entrada);
 
       // ⚠️ FIX: Usar await al crear el token
       const token = await crearToken({
         sub: u.id,
-        rol: "admin",
+        rol: u.rol,
         ci: (u.ci ?? "").toUpperCase(),
         nombre: u.nombre,
         correo: u.correo,
@@ -105,14 +116,14 @@ cookieStore.set("seguit_sesion", token, opcionesCookie());
         token,
         idUsuario: u.id,
         ci: u.ci ?? "",
-        rol: "admin",
+        rol: u.rol,
         expiracionMs: DURACION_SESION_MS,
         ip: ipDesde(req),
         userAgent: req.headers.get("user-agent"),
       });
 
       return NextResponse.json({
-        rol: "admin",
+        rol: u.rol,
         ci: u.ci ?? "",
         nombre: u.nombre,
         correo: u.correo,

@@ -1,0 +1,66 @@
+# ─────────────────────────────────────────────────────────────────
+# Base de datos SOLO (PostgreSQL 16), sin la app ni el proxy.
+#
+# Para qué: levantar la base cuando la app corre en el host (el
+# escenario 2 del README). Es exactamente el servicio `db` del
+# docker-compose.yml principal, pero aislado, por si querés
+# levantarla sin construir la imagen de Next.js.
+#
+#   docker compose -p sistitulados-db -f docker-compose.db.yml up -d
+#   docker compose -p sistitulados-db -f docker-compose.db.yml down
+#
+# El `-p sistitulados-db` NO es opcional. Docker Compose deriva el nombre del
+# proyecto del nombre del DIRECTORIO, así que sin `-p` este archivo y el
+# `docker-compose.yml` principal serían el mismo proyecto: al levantar uno,
+# Compose trata el contenedor del otro como "orphan" y lo borra. Con `-p`
+# cada archivo tiene su propio proyecto, sus contenedores y su volumen.
+#
+# ── OJO CON EL PUERTO ────────────────────────────────────────────
+# El puerto publicado sale de DB_PORT en `.env` (5433), NO de 5432.
+# El 5432 del host suele estar tomado por el PostgreSQL nativo de
+# Ubuntu/Debian, y Docker no puede publicar ahí: da
+# "Bind for 0.0.0.0:5432 failed: port is already allocated".
+#
+# Este archivo y el `docker-compose.yml` principal comparten DB_PORT (5433),
+# así que los dos `db` NO pueden estar levantados a la vez: el segundo fallaría
+# con "port is already allocated". En la práctica no hace falta tenerlos juntos:
+# si la principal ya está arriba, su servicio `db` ya cubre el escenario 2.
+#
+#   docker compose down                                              # para el principal
+#   docker compose -p sistitulados-db -f docker-compose.db.yml up -d # para este
+#
+# Dentro de la red de Docker la app se conecta siempre a db:5432:
+# el 5433 es solo la puerta de entrada desde el host.
+# ─────────────────────────────────────────────────────────────────
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: sistitulados_db_dev
+    restart: unless-stopped
+    environment:
+      # Mismos defaults que docker-compose.yml: si arrancás la app en el
+      # host contra esta base, el usuario y la clave tienen que coincidir
+      # con los que ahí se usan, o la conexión falla.
+      POSTGRES_DB: ${DB_NAME:-sistitulados_db}
+      POSTGRES_USER: ${DB_USER:-seguit_app}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-clave_segura_123}
+    ports:
+      - "${DB_PORT:-5433}:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-seguit_app} -d ${DB_NAME:-sistitulados_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
+
+volumes:
+  postgres_dev_data:
+    driver: local

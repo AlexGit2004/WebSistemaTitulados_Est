@@ -16,7 +16,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
  * válida, `user` queda en null y no hay nada que Falsear.
  */
 
-export type Rol = "admin" | "TITULADO" | "EGRESADO";
+export type Rol = "admin" | "TITULADO" | "EGRESADO" | "KARDEX";
 
 export interface AuthUser {
   rol: Rol;

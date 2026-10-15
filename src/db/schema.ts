@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   pgTable,
   serial,
@@ -11,6 +11,7 @@ import {
   pgEnum,
   uniqueIndex,
   index,
+  check,
 } from "drizzle-orm/pg-core";
 
 // ── Enums ─────────────────────────────────────────────────────────────────────
@@ -85,6 +86,7 @@ export const sectorTrabajoEnum = pgEnum("sector_trabajo_enum", [
 export const usuarioRolEnum = pgEnum("usuario_rol_enum", [
   "admin",
   "usuario",
+  "KARDEX",
 ]);
 
 export const usuarioEstadoEnum = pgEnum("usuario_estado_enum", [
@@ -105,6 +107,13 @@ export const auditAccionEnum = pgEnum("audit_accion_enum", [
   "eliminar",
   "exportar",
   "importar",
+  // Derechos del titular (ISO/IEC 27701:2025, cláusula sobre derechos de los titulares).
+  // Se registran en el mismo log que las acciones administrativas para que el
+  // ejercicio de un derecho sea trazable y auditable por la misma vía.
+  "consultar_datos",
+  "exportar_datos",
+  "suprimir_datos",
+  "consentimiento",
 ]);
 
 // ── Tabla Principal Unificada: personas ───────────────────────────────────────
@@ -119,6 +128,9 @@ export const personas = pgTable(
     // ── Campos Kardex Estáticos (Marcados con 'K' - Inmutables) ───────────────
     nombresApellidos: text("nombres_apellidos").notNull(),
     cedulaIdentidad: varchar("cedula_identidad", { length: 20 }).notNull().unique(),
+    nivelEstudio: varchar("nivelestudio", { length: 50 }),
+    realizoCursoUltimos3Anos: boolean("realizo_curso_ultimos_3_anios"),
+    ultimoCurso: varchar("ultimocurso", { length: 200 }),
     genero: generoEnum("genero").notNull().default("PREFIERO_NO_DECIR"),
     semestreIngreso: varchar("semestre_ingreso", { length: 20 }), // ej. "I/2018", "II/2019"
     semestreEgreso: varchar("semestre_egreso", { length: 30 }),   // ej. "1er semestre 2023", "I/2023"
@@ -166,12 +178,47 @@ export const personas = pgTable(
     eliminadoPor: integer("eliminado_por").references(() => usuarios.id, { onDelete: "set null" }),
     motivoBaja: text("motivo_baja"),
 
+    // ── Gestión del consentimiento (ISO/IEC 27701:2025 · Ley 1405 art. 5) ───────
+    //
+    // El aviso de privacidad exige poder DEMOSTRAR que el titular Rhineó y cuándo.
+    // Sin marca de tiempo y sin huella del texto vigente, esa prueba no existe: un
+    // registro sin `consentimientoOtorgadoEn` no cumple y, además, no se puede saber
+    // si el titular aceptó la versión del aviso que se publica hoy o una anterior.
+    //
+    // `consentimientoVersion` guarda la versión del aviso aceptada, no la última
+    // publicada: así, si el aviso cambia, se puede listar quién debe volver a aceptarlo.
+    consentimientoOtorgado: boolean("consentimiento_otorgado").notNull().default(false),
+    consentimientoOtorgadoEn: timestamp("consentimiento_otorgado_en"),
+    consentimientoVersion: varchar("consentimiento_version", { length: 20 }),
+    // IP y user agent del envío del formulario. La Ley 1405 exige constancia de la
+    // fecha, hora y medio; guardarlos permite acreditarla.
+    consentimientoIp: varchar("consentimiento_ip", { length: 45 }),
+
+    // ── Derecho de supresión (derecho deCancellation / rectificación) ────────────
+    //
+    // La baja lógica (D3) NO satisface el derecho de supresión: conserva la fila y
+    // todos los campos. Se marcan aquí los campos que deben anonimizarse cuando el
+    // titular lo exerce, para que el borrado sea efectivo sin perder el agregado
+    // estadístico (que es lo único que justifica conservar la fila).
+    supresionSolicitadaEn: timestamp("supresion_solicitada_en"),
+    supresionCompletadaEn: timestamp("supresion_completada_en"),
+    supresionMotivo: text("supresion_motivo"),
+
     // Auditoría temporal
     creadoEn: timestamp("creado_en").notNull().defaultNow(),
     actualizadoEn: timestamp("actualizado_en").defaultNow(),
   },
   (table) => ({
+    ciSoloDigitos: check("personas_ci_solo_digitos", sql`${table.cedulaIdentidad} ~ '^[0-9]+$'`),
+    // Imposibilidad de tener el consentimiento marcado sin fecha, o fecha sin marca:
+    // es la regla que hace que el campo no pueda mentir.
+    consentimientoCoherente: check(
+      "personas_consentimiento_coherente",
+      sql`(${table.consentimientoOtorgado} and ${table.consentimientoOtorgadoEn} is not null and ${table.consentimientoVersion} is not null)
+          or (not ${table.consentimientoOtorgado} and ${table.consentimientoOtorgadoEn} is null)`
+    ),
     ciIdx: uniqueIndex("personas_ci_unique_idx").on(table.cedulaIdentidad),
+    consentimientoIdx: index("idx_personas_consentimiento").on(table.consentimientoOtorgado),
     tipoIdx: index("idx_personas_tipo").on(table.tipo),
     estadoLaboralIdx: index("idx_personas_estado_laboral").on(table.estadoLaboral),
     sectorTrabajoIdx: index("idx_personas_sector_trabajo").on(table.sectorTrabajo),
@@ -179,6 +226,87 @@ export const personas = pgTable(
     anioEgresoIdx: index("idx_personas_anio_egreso").on(table.anioEgreso),
     ciudadIdx: index("idx_personas_ciudad").on(table.ciudadRegionTrabajo),
     activoIdx: index("idx_personas_activo").on(table.activo),
+  })
+);
+
+export const carreras = pgTable(
+  "carreras",
+  {
+    id: serial("id").primaryKey(),
+    ci: varchar("ci", { length: 20 })
+      .notNull()
+      .references(() => personas.cedulaIdentidad, { onDelete: "cascade" }),
+    carrera: varchar("carrera", { length: 200 }),
+    universidad: varchar("universidad", { length: 200 }),
+    facultad: varchar("facultad", { length: 200 }),
+    grados: varchar("grados", { length: 200 }),
+    creadaEn: timestamp("creada_en").notNull().defaultNow(),
+  },
+  (table) => ({ ciIdx: index("idx_carreras_ci").on(table.ci) })
+);
+
+export const solicitudTitulado = pgTable(
+  "solicitudtitulado",
+  {
+    id: serial("id").primaryKey(),
+    ci: varchar("ci", { length: 20 })
+      .notNull()
+      .references(() => personas.cedulaIdentidad, { onDelete: "restrict" }),
+    fechaSolicitud: timestamp("fechasolicitud").notNull().defaultNow(),
+    fechaRevision: timestamp("fecharevision"),
+    ipMaquinaAprobo: varchar("ipmaquinaaprobo", { length: 45 }),
+    nombre: varchar("nombre", { length: 150 }),
+    detalle: text("detalle"),
+    estado: varchar("estado", { length: 30 }).notNull().default("PENDIENTE"),
+  },
+  (table) => ({
+    estadoValido: check("solicitudtitulado_estado_valido", sql`${table.estado} in ('PENDIENTE', 'ACEPTADO', 'RECHAZADO')`),
+    motivoRechazo: check("solicitudtitulado_rechazo_con_detalle", sql`${table.estado} <> 'RECHAZADO' or length(btrim(${table.detalle})) > 0`),
+    pendienteSinRevision: check("solicitudtitulado_revision_estado", sql`(${table.estado} = 'PENDIENTE' and ${table.fechaRevision} is null) or (${table.estado} in ('ACEPTADO', 'RECHAZADO') and ${table.fechaRevision} is not null)`),
+    unaPendientePorCi: uniqueIndex("solicitudtitulado_una_pendiente_por_ci").on(table.ci).where(sql`${table.estado} = 'PENDIENTE'`),
+    ciIdx: index("idx_solicitudtitulado_ci_fecha").on(table.ci, table.fechaSolicitud),
+    estadoIdx: index("idx_solicitudtitulado_estado_fecha").on(table.estado, table.fechaSolicitud),
+  })
+);
+
+export const solicitudTituladoHistorial = pgTable(
+  "solicitudtitulado_historial",
+  {
+    id: serial("id").primaryKey(),
+    solicitudId: integer("solicitud_id")
+      .notNull()
+      .references(() => solicitudTitulado.id, { onDelete: "cascade" }),
+    ci: varchar("ci", { length: 20 })
+      .notNull()
+      .references(() => personas.cedulaIdentidad, { onDelete: "restrict" }),
+    estado: varchar("estado", { length: 30 }).notNull(),
+    fecha: timestamp("fecha").notNull().defaultNow(),
+    nombre: varchar("nombre", { length: 150 }),
+    ip: varchar("ip", { length: 45 }),
+    detalle: text("detalle"),
+  },
+  (table) => ({
+    estadoValido: check("solicitudtitulado_historial_estado_valido", sql`${table.estado} in ('PENDIENTE', 'ACEPTADO', 'RECHAZADO')`),
+    solicitudIdx: index("idx_solicitudtitulado_historial_solicitud").on(table.solicitudId, table.fecha),
+  })
+);
+
+export const solicitudTituladoDocumento = pgTable(
+  "solicitudtitulado_documentos",
+  {
+    id: serial("id").primaryKey(),
+    solicitudId: integer("solicitud_id")
+      .notNull()
+      .references(() => solicitudTitulado.id, { onDelete: "cascade" }),
+    nombreOriginal: varchar("nombre_original", { length: 255 }).notNull(),
+    nombreAlmacenado: varchar("nombre_almacenado", { length: 100 }).notNull().unique(),
+    tipoMime: varchar("tipo_mime", { length: 100 }).notNull(),
+    tamanoBytes: integer("tamano_bytes").notNull(),
+    creadoEn: timestamp("creado_en").notNull().defaultNow(),
+  },
+  (table) => ({
+    tamanoValido: check("solicitudtitulado_documento_tamano_valido", sql`${table.tamanoBytes} > 0 and ${table.tamanoBytes} <= 10485760`),
+    solicitudIdx: index("idx_solicitudtitulado_documentos_solicitud").on(table.solicitudId),
   })
 );
 
@@ -279,6 +407,20 @@ export const noticiasCursos = pgTable(
 );
 
 // ── Tabla de Auditoría (Audit Log) ────────────────────────────────────────────
+/**
+ * Registro encadenado de actividad (ISO/IEC 27001:2022, A.8.16 "Logging"; A.8.15 en la
+ * edición 2013, que es de donde procede el requisito original del proyecto).
+ *
+ * `hash` y `hashAnterior` encadenan cada fila con la anterior. Si alguien borra o altera
+ * una fila ya escrita —un administrador con acceso a la tabla, o una restauración de
+ * backup incompleta— la cadena deja de cuadrar y el procedimiento de verificación
+ * detecta exactamente qué fila se manipuló y en qué punto se rompió.
+ *
+ * La cadena no impide el borrado por sí sola: por eso la migración añade además un
+ * trigger que RECHAZA cualquier UPDATE o DELETE sobre la tabla. La garantía la impone el
+ * motor, no el código de aplicación, porque el código se puede cambiar y el permiso de
+ * escritura de la tabla no debería depender de eso.
+ */
 export const auditLog = pgTable(
   "audit_log",
   {
@@ -292,6 +434,11 @@ export const auditLog = pgTable(
     datosNuevos: text("datos_nuevos"),
     ip: varchar("ip", { length: 45 }),
     creadoEn: timestamp("creado_en").notNull().defaultNow(),
+
+    // Cadena de integridad. `hashAnterior` es el `hash` de la fila previa (la primera
+    // fila de la cadena lo tiene nulo).
+    hashAnterior: varchar("hash_anterior", { length: 64 }),
+    hash: varchar("hash", { length: 64 }).notNull(),
   },
   (table) => ({
     accionIdx: index("idx_audit_accion").on(table.accion),
@@ -325,6 +472,18 @@ export const sesionesRelations = relations(sesiones, ({ one }) => ({
 // ── Tipos TypeScript inferidos ────────────────────────────────────────────────
 export type Persona = typeof personas.$inferSelect;
 export type NuevaPersona = typeof personas.$inferInsert;
+
+export type Carrera = typeof carreras.$inferSelect;
+export type NuevaCarrera = typeof carreras.$inferInsert;
+
+export type SolicitudTitulado = typeof solicitudTitulado.$inferSelect;
+export type NuevaSolicitudTitulado = typeof solicitudTitulado.$inferInsert;
+
+export type SolicitudTituladoHistorial = typeof solicitudTituladoHistorial.$inferSelect;
+export type NuevoSolicitudTituladoHistorial = typeof solicitudTituladoHistorial.$inferInsert;
+
+export type SolicitudTituladoDocumento = typeof solicitudTituladoDocumento.$inferSelect;
+export type NuevoSolicitudTituladoDocumento = typeof solicitudTituladoDocumento.$inferInsert;
 
 export type Usuario = typeof usuarios.$inferSelect;
 export type NuevoUsuario = typeof usuarios.$inferInsert;

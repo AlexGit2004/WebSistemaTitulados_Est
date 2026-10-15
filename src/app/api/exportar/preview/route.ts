@@ -3,9 +3,18 @@ import { db } from "@/db";
 import { personas } from "@/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { exigirAdmin, errorInterno } from "@/lib/guards";
+import { aFiltroEnum, aValorEnum } from "@/lib/filtros";
+import { sanearReporte } from "@/lib/privacidad";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * GET /api/exportar/preview  (SOLO ADMIN)
+ *
+ * Muestra los primeros 50 registros del reporte que se va a descargar. No exige firma
+ * temporal: no devuelve datos de una persona distinta de las que el propio admin está
+ * ya viendo en su sesión, y no genera un archivo fuera de su máquina.
+ */
 export async function GET(request: NextRequest) {
   const denegado = await exigirAdmin(request);
   if (denegado) return denegado;
@@ -33,11 +42,13 @@ export async function GET(request: NextRequest) {
     }
 
     if (sector && sector !== "TODOS") {
-      conditions.push(eq(personas.sectorTrabajo, sector as any));
+      const sectorValido = aFiltroEnum(personas.sectorTrabajo, sector);
+    if (sectorValido) conditions.push(eq(personas.sectorTrabajo, sectorValido));
     }
 
     if (modalidad && modalidad !== "TODAS") {
-      conditions.push(eq(personas.modalidadTitulacion, modalidad as any));
+      const modalidadValida = aFiltroEnum(personas.modalidadTitulacion, modalidad, "TODAS");
+    if (modalidadValida) conditions.push(eq(personas.modalidadTitulacion, modalidadValida));
     }
 
     if (anioMin) {
@@ -58,7 +69,12 @@ export async function GET(request: NextRequest) {
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .limit(50);
 
-    const dataPreview = registros.map((r, idx) => ({
+    // Mismo saneamiento que en la exportación real. La vista previa se renderiza con
+    // React, que escapa el contenido, así que aquí no hay XSS; pero la casilla "Sí,
+    // exportar" sugiere que lo que se ve es lo que se descarga, y si el archivo lleva
+    // un apóstrofo added al inicio y la vista previa no, la previsualización miente.
+    const dataPreview = sanearReporte(
+      registros.map((r, idx) => ({
       "N°": idx + 1,
       Tipo: r.tipo,
       "Cédula de Identidad (K)": r.cedulaIdentidad,
@@ -84,7 +100,8 @@ export async function GET(request: NextRequest) {
       Teléfono: r.telefono || "—",
       "Redes Sociales": r.redesSociales || "—",
       Observaciones: r.observaciones || "—",
-    }));
+      }))
+    );
 
     return NextResponse.json({
       total: registros.length,

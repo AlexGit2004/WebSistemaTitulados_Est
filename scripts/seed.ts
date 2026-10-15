@@ -14,9 +14,10 @@
  */
 
 import { db, pool } from "../src/db";
-import { personas, usuarios, noticiasCursos } from "../src/db/schema";
+import { personas, usuarios, noticiasCursos, carreras, solicitudTitulado, solicitudTituladoHistorial } from "../src/db/schema";
 import { sql } from "drizzle-orm";
 import { hashPassword } from "../src/lib/password";
+import { asegurarCuentaKardex } from "./seed_kardex";
 
 const RESET = process.argv.includes("--reset");
 
@@ -27,41 +28,60 @@ async function main() {
   const yaHay = await db.select({ n: sql<number>`count(*)` }).from(personas);
   if ((yaHay[0]?.n ?? 0) > 0) {
     if (!RESET) {
+      const kardex = await asegurarCuentaKardex();
       console.log(
         `La tabla 'personas' ya tiene ${yaHay[0].n} registros. ` +
           `No se insertó nada. Usa "pnpm seed -- --reset" solo en desarrollo.`
       );
+      if (kardex) console.log(`Kardex de prueba: ${kardex.correo} / ${kardex.password}`);
       await cerrar();
       return;
     }
     console.log("--reset: borrando datos de prueba...");
-    await db.execute(sql`TRUNCATE TABLE personas RESTART IDENTITY CASCADE;`);
-    await db.execute(sql`TRUNCATE TABLE noticias_cursos RESTART IDENTITY CASCADE;`);
-    await db.execute(sql`TRUNCATE TABLE usuarios RESTART IDENTITY CASCADE;`);
+    await db.execute(sql`DELETE FROM solicitudtitulado_historial;`);
+    await db.execute(sql`DELETE FROM solicitudtitulado;`);
+    await db.execute(sql`DELETE FROM carreras;`);
+    await db.execute(sql`DELETE FROM verificaciones;`);
+    await db.execute(sql`DELETE FROM sesiones;`);
+    await db.execute(sql`DELETE FROM personas;`);
+    await db.execute(sql`DELETE FROM noticias_cursos;`);
   }
 
   // ── Usuarios administradores ────────────────────────────────────────────────
-  console.log("Insertando usuarios administradores...");
-  await db.insert(usuarios).values({
-    ci: null,
-    nombre: "Administrador",
-    correo: ADMIN_CORREO,
-    passwordHash: hashPassword(ADMIN_PASSWORD),
-    rol: "admin",
-    estado: "activo",
-  });
+  console.log("Insertando o actualizando usuarios administradores...");
+  await db
+    .insert(usuarios)
+    .values({
+      ci: null,
+      nombre: "Administrador",
+      correo: ADMIN_CORREO,
+      passwordHash: hashPassword(ADMIN_PASSWORD),
+      rol: "admin",
+      estado: "activo",
+    })
+    .onConflictDoUpdate({
+      target: usuarios.correo,
+      set: {
+        passwordHash: hashPassword(ADMIN_PASSWORD),
+        estado: "activo",
+      },
+    });
+  const kardex = await asegurarCuentaKardex();
 
   // ── Titulados ───────────────────────────────────────────────────────────────
   const dataTitulados = [
     {
       tipo: "TITULADO" as const,
       nombresApellidos: "Carlos Alberto Mendoza Ramos",
-      cedulaIdentidad: "6893412LP",
+      cedulaIdentidad: "6893412",
       genero: "MASCULINO" as const,
       semestreIngreso: "I/2016",
       semestreEgreso: "II/2020",
       anioEgreso: 2020,
       anioTitulacion: 2021,
+      nivelEstudio: "LICENCIATURA",
+      realizoCursoUltimos3Anos: true,
+      ultimoCurso: "ANÁLISIS DE DATOS CON R",
       modalidadTitulacion: "Tesis" as const,
       areaEspecializacion: "Ciencia de Datos y Bioestadística",
       correoElectronico: "carlos.mendoza@umsa.bo",
@@ -79,7 +99,7 @@ async function main() {
     {
       tipo: "TITULADO" as const,
       nombresApellidos: "Mariana Elena Quispe Flores",
-      cedulaIdentidad: "7823901LP",
+      cedulaIdentidad: "7823901",
       genero: "FEMENINO" as const,
       semestreIngreso: "I/2017",
       semestreEgreso: "II/2021",
@@ -102,7 +122,7 @@ async function main() {
     {
       tipo: "TITULADO" as const,
       nombresApellidos: "Rodrigo Javier Mamani Choque",
-      cedulaIdentidad: "8912344LP",
+      cedulaIdentidad: "8912344",
       genero: "MASCULINO" as const,
       semestreIngreso: "II/2017",
       semestreEgreso: "I/2022",
@@ -125,7 +145,7 @@ async function main() {
     {
       tipo: "TITULADO" as const,
       nombresApellidos: "Gabriela Andrea Vargas Pinto",
-      cedulaIdentidad: "9123845LP",
+      cedulaIdentidad: "9123845",
       genero: "FEMENINO" as const,
       semestreIngreso: "I/2018",
       semestreEgreso: "II/2022",
@@ -148,7 +168,7 @@ async function main() {
     {
       tipo: "TITULADO" as const,
       nombresApellidos: "Fernando David Torrez Gomez",
-      cedulaIdentidad: "6023941LP",
+      cedulaIdentidad: "6023941",
       genero: "MASCULINO" as const,
       semestreIngreso: "I/2015",
       semestreEgreso: "II/2019",
@@ -172,7 +192,7 @@ async function main() {
       // Casos para ejercitar el filtro por sector "OTRO"
       tipo: "TITULADO" as const,
       nombresApellidos: "Lucía Beatriz Oquendo Salazar",
-      cedulaIdentidad: "5543218LP",
+      cedulaIdentidad: "5543218",
       genero: "FEMENINO" as const,
       semestreIngreso: "II/2016",
       semestreEgreso: "I/2021",
@@ -200,7 +220,7 @@ async function main() {
     {
       tipo: "EGRESADO" as const,
       nombresApellidos: "Lucía Belén Gutierrez Morales",
-      cedulaIdentidad: "8341920LP",
+      cedulaIdentidad: "8341920",
       genero: "FEMENINO" as const,
       semestreIngreso: "I/2018",
       semestreEgreso: "II/2023",
@@ -222,7 +242,7 @@ async function main() {
     {
       tipo: "EGRESADO" as const,
       nombresApellidos: "Jorge Luis Condori Apaza",
-      cedulaIdentidad: "9048123LP",
+      cedulaIdentidad: "9048123",
       genero: "MASCULINO" as const,
       semestreIngreso: "II/2018",
       semestreEgreso: "I/2024",
@@ -244,7 +264,7 @@ async function main() {
     {
       tipo: "EGRESADO" as const,
       nombresApellidos: "Paola Andrea Suarez Mendez",
-      cedulaIdentidad: "7129034LP",
+      cedulaIdentidad: "7129034",
       genero: "FEMENINO" as const,
       semestreIngreso: "I/2017",
       semestreEgreso: "II/2022",
@@ -267,7 +287,7 @@ async function main() {
     {
       tipo: "EGRESADO" as const,
       nombresApellidos: "Ñuñez Vargas Cristian Ángel",
-      cedulaIdentidad: "6677881LP",
+      cedulaIdentidad: "6677881",
       genero: "MASCULINO" as const,
       semestreIngreso: "I/2019",
       semestreEgreso: "II/2024",
@@ -290,6 +310,14 @@ async function main() {
 
   console.log("Insertando titulados y egresados de prueba...");
   await db.insert(personas).values([...dataTitulados, ...dataEgresados]);
+
+  await db.insert(carreras).values([
+    { ci: "7823901", carrera: "INGENIERÍA INFORMÁTICA", universidad: "UNIVERSIDAD MAYOR DE SAN ANDRÉS", facultad: "FACULTAD DE CIENCIAS PURAS Y NATURALES", grados: "LICENCIATURA" },
+    { ci: "7823901", carrera: "ECONOMÍA", universidad: "UNIVERSIDAD PÚBLICA DE EL ALTO", facultad: "CIENCIAS ECONÓMICAS", grados: "LICENCIATURA" },
+  ]);
+
+  const [solicitudDemo] = await db.insert(solicitudTitulado).values({ ci: "8341920" }).returning({ id: solicitudTitulado.id });
+  await db.insert(solicitudTituladoHistorial).values({ solicitudId: solicitudDemo!.id, ci: "8341920", estado: "PENDIENTE" });
 
   // ── Noticias y convocatorias ────────────────────────────────────────────────
   console.log("Insertando noticias y convocatorias...");
@@ -348,8 +376,9 @@ async function main() {
   console.log(`  - noticias:      ${n} (1 sin publicar)`);
   console.log("");
   console.log(`Admin: ${ADMIN_CORREO} / ${ADMIN_PASSWORD}`);
-  console.log("Titulado ejemplo (CI, sin contraseña): 6893412LP");
-  console.log("Egresado ejemplo (CI, sin contraseña): 8341920LP");
+  if (kardex) console.log(`Kardex de prueba: ${kardex.correo} / ${kardex.password}`);
+  console.log("Titulado ejemplo (CI, sin contraseña): 6893412");
+  console.log("Egresado ejemplo (CI, sin contraseña): 8341920");
 
   await cerrar();
 }

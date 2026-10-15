@@ -37,7 +37,7 @@ export const dynamic = "force-dynamic";
  * evento con precisión ("se creó una sesión" / "se eliminó una sesión").
  */
 
-const ROLES_CONOCIDOS = new Set(["admin", "TITULADO", "EGRESADO"]);
+const ROLES_CONOCIDOS = new Set(["admin", "TITULADO", "EGRESADO", "KARDEX"]);
 
 export async function GET(req: NextRequest) {
   try {
@@ -84,8 +84,18 @@ export async function GET(req: NextRequest) {
   }
 }
 
+/**
+ * El cierre de sesión no lleva datos. Si llega un cuerpo, el cliente está
+ * desincronizado y conviene enterarse en vez de ignorarlo en silencio.
+ */
+async function exigirCierreSinCuerpo(req: NextRequest): Promise<void> {
+  const limpio = (await req.text()).trim();
+  if (limpio !== "") throw new Error("CUERPO_NO_ESPERADO_EN_LOGOUT");
+}
+
 export async function POST(req: NextRequest) {
   try {
+    await exigirCierreSinCuerpo(req);
     const token = tokenDeRequest(req);
 
     // El logout se resuelve primero desde la cookie: si la sesión ya expiró, el token
@@ -97,15 +107,15 @@ export async function POST(req: NextRequest) {
     }
 
     if (sesion) {
-      // Si el usuario es un administrador, se anota contra su id en `usuarios`. Un
+      // Las cuentas administrativas (admin/Kardex) se anotan contra `usuarios`. Un
       // titular sin cuenta propia se registra con `idUsuario` nulo.
-      const esAdmin = sesion.rol === "admin";
-      const idUsuario = esAdmin ? sesion.sub : null;
+      const esCuentaAdministrativa = sesion.rol === "admin" || sesion.rol === "KARDEX";
+      const idUsuario = esCuentaAdministrativa ? sesion.sub : null;
 
-      // Comprobación adicional: si el administrador fue desactivado o bloqueado
+      // Comprobación adicional: si la cuenta administrativa fue desactivada o bloqueada
       // mientras tenía la sesión abierta, el cierre de sesión lo refleja en el log.
       let estadoAdmin: string | null = null;
-      if (esAdmin) {
+      if (esCuentaAdministrativa) {
         const filas = await db
           .select({ estado: usuarios.estado })
           .from(usuarios)

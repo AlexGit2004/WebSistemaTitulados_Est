@@ -4,14 +4,25 @@ import {
   Users, Briefcase, GraduationCap, Clock, TrendingUp, CheckCircle2, PieChart as PieIcon, BarChart3, Layers, BookOpen, MapPin,
 } from "lucide-react";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
+import GraficoSector from "@/components/GraficoSector";
+import { useTemaOscuro } from "@/lib/useTemaOscuro";
+import { estilosEjes, estilosTooltip } from "@/lib/graficoTema";
+import { SUBTITULO_SECTOR } from "@/lib/sectores";
 
-const COLORS = ["#1e3a8a","#059669","#d97706","#7c3aed","#dc2626","#0891b2","#4b5563"];
+interface KpiSombre {
+  /** Valor publicable. `null` cuando no hay muestra alguna (total 0). */
+  metric_value: number | null;
+  /** Registros que respaldan el indicador. */
+  total_sample: number;
+  /** `false` cuando no hay datos que sostener el indicador. */
+  show_kpi: boolean;
+}
 
 interface Data {
-  kpisTitulados: { totalTitulados:number; tasaEmpleabilidadTitulados:number; tiempoPromedioEgresoTitulacion:number; tiempoPromedioInsercionTitulados:number; porcentajeEmpleoEstadistica:number; };
-  kpisEgresados: { totalEgresados:number; tasaEmpleabilidadEgresados:number; tiempoPromedioInsercionEgresados:number; };
+  kpisTitulados: KpiSombre & { totalTitulados:number; tasaEmpleabilidadTitulados:number; tiempoPromedioEgresoTitulacion:number; tiempoPromedioInsercionTitulados:number; porcentajeEmpleoEstadistica:number; };
+  kpisEgresados: KpiSombre & { totalEgresados:number; tasaEmpleabilidadEgresados:number; tiempoPromedioInsercionEgresados:number; };
   seriesPorAnio: Array<{anio:number;titulados:number;egresados:number}>;
   seriesSectorTitulados: Array<{name:string;valor:number;key:string}>;
   seriesSectorEgresados: Array<{name:string;valor:number;key:string}>;
@@ -20,16 +31,40 @@ interface Data {
   seriesModalidades: Array<{modalidad:string;total:number}>;
   seriesMotivosNoTitulacion: Array<{motivo:string;total:number}>;
   tablaCohortes: Array<{cohorte:string;titulados:number;egresados:number;total:number}>;
+  privacidad?: { modelo: string; umbralK: null };
 }
 
 export default function PublicDashboard({ vista: vistaFija }: { vista?: "TITULADOS"|"EGRESADOS" }) {
   const [vista, setVista] = useState<"TITULADOS"|"EGRESADOS">(vistaFija ?? "TITULADOS");
   const [data, setData] = useState<Data|null>(null);
-  const [sectorHover, setSectorHover] = useState<number|null>(null);
+  const oscuro = useTemaOscuro();
+  const tool = estilosTooltip(oscuro);
+  const ejes = estilosEjes(oscuro);
   useEffect(()=>{ fetch("/api/dashboard").then(r=>r.json()).then(setData).catch(()=>{}); },[vistaFija]);
   if(!data) return <div className="text-sm text-slate-500 py-6">Cargando indicadores...</div>;
+
+  /**
+   * Sin umbral k, no hay celdas ocultas por tamano de grupo. Lo unico que puede
+   * faltar es que no haya ninguna persona registrada todavia, y eso se explica con
+   * un mensaje honesto: "aun no hay datos", no "no podemos decirlo por privacidad".
+   */
+  const sinDatos =
+    !data.kpisTitulados.show_kpi && !data.kpisEgresados.show_kpi;
+
   return (
     <div className="space-y-6">
+      {sinDatos && (
+        <div className="rounded-2xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 p-5 text-sm">
+          <b className="block font-bold text-amber-900 dark:text-amber-200">
+            Todavia no hay datos publicados
+          </b>
+          <p className="mt-1 text-amber-800 dark:text-amber-300">
+            Los indicadores se calculan sobre conteos agregados y no incluyen ningun
+            dato que permita identificar a una persona. Apareceran en cuanto se
+            registren graduados.
+          </p>
+        </div>
+      )}
       {vistaFija ? null : (
       <div className="flex justify-center">
         <div className="inline-flex rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
@@ -59,12 +94,15 @@ export default function PublicDashboard({ vista: vistaFija }: { vista?: "TITULAD
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm hover:shadow-md hover:border-slate-300 dark:hover:border-slate-600 transition">
           <h2 className="text-base font-bold flex items-center gap-2"><BarChart3 className="w-5 h-5 text-blue-800"/>{vista==="TITULADOS" ? "Titulados por Gestión / Año":"Egresados por Gestión"}</h2>
           <p className="text-xs text-slate-500">Distribución cronológica de graduados</p>
-          <div className="h-64 mt-2"><ResponsiveContainer width="100%" height="100%"><BarChart data={data.seriesPorAnio} margin={{top:10,right:10,left:-20,bottom:0}}><CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2}/><XAxis dataKey="anio" fontSize={12}/><YAxis fontSize={12} allowDecimals={false}/><Tooltip contentStyle={{backgroundColor:"#0f172a",border:"none",borderRadius:"8px",color:"#fff",fontSize:"15px"}}/><Legend/>{vista==="TITULADOS" ? <Bar dataKey="titulados" name="Titulados" fill="#1e3a8a" radius={[4,4,0,0]}/>:<Bar dataKey="egresados" name="Egresados" fill="#d97706" radius={[4,4,0,0]}/>}</BarChart></ResponsiveContainer></div>
+          <div className="h-64 mt-2"><ResponsiveContainer width="100%" height="100%"><BarChart data={data.seriesPorAnio} margin={{top:10,right:10,left:-20,bottom:0}}><CartesianGrid strokeDasharray="3 3" stroke={ejes.rejilla} strokeOpacity={0.2}/><XAxis dataKey="anio" stroke={ejes.eje} tick={{fill:ejes.textoEje, fontSize:12}}/><YAxis stroke={ejes.eje} tick={{fill:ejes.textoEje, fontSize:12}} allowDecimals={false}/><Tooltip {...estilosTooltip(oscuro, 15)}/><Legend/>{vista==="TITULADOS" ? <Bar dataKey="titulados" name="Titulados" fill="#1e3a8a" radius={[4,4,0,0]}/>:<Bar dataKey="egresados" name="Egresados" fill="#d97706" radius={[4,4,0,0]}/>}</BarChart></ResponsiveContainer></div>
         </div>
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm hover:shadow-md hover:border-slate-300 dark:hover:border-slate-600 transition">
-          <h2 className="text-base font-bold flex items-center gap-2"><PieIcon className="w-5 h-5 text-emerald-700"/>Distribución por Sector Laboral ({vista})</h2>
-          <p className="text-xs text-slate-500">Público, Privado, Académico, ONG e Independiente</p>
-          <div className="h-64 flex items-center justify-center"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={vista==="TITULADOS"?data.seriesSectorTitulados:data.seriesSectorEgresados} dataKey="valor" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={3} label={({name,percent})=>(`${name} ${(percent*100).toFixed(0)}%`)} labelLine={false} onMouseEnter={(_:unknown,i:number)=>setSectorHover(i)} onMouseLeave={()=>setSectorHover(null)} style={{cursor:"pointer",outline:"none"}}>{(vista==="TITULADOS"?data.seriesSectorTitulados:data.seriesSectorEgresados).map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]} fillOpacity={sectorHover===null||sectorHover===i?1:0.25} stroke={sectorHover===i?"#0f172a":"transparent"} strokeWidth={sectorHover===i?2:0} style={{cursor:"pointer",outline:"none"}} className="transition-opacity duration-200"/>)}</Pie><Tooltip contentStyle={{backgroundColor:"#0f172a",border:"none",borderRadius:"8px",color:"#fff",fontSize:"15px"}}/></PieChart></ResponsiveContainer></div>
+          <h2 className="text-base font-bold flex items-center gap-2"><PieIcon className="w-5 h-5 text-emerald-700 dark:text-emerald-400"/>Distribución por Sector Laboral ({vista})</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">{SUBTITULO_SECTOR}</p>
+          <GraficoSector
+            series={vista==="TITULADOS" ? data.seriesSectorTitulados : data.seriesSectorEgresados}
+            etiqueta={vista==="TITULADOS" ? "Titulados" : "Egresados"}
+          />
         </div>
       </div>
 

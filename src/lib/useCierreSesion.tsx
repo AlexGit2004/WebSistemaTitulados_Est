@@ -16,6 +16,7 @@ function esPaginaInterna(p: string) {
     p === "/login" ||
     p === "/admin" ||
     p.startsWith("/admin/") ||
+    p.startsWith("/kardex/") ||
     p.startsWith("/kpis/") ||
     p.startsWith("/noticias/") ||
     p.startsWith("/portal/")
@@ -78,6 +79,9 @@ export function useCierreSesion() {
   const confirmRef = useRef(confirm);
   const cerrandoRef = useRef(cerrando);
   const userRef = useRef(user);
+  // Marca el tramo entre que se acepta el cierre y que se aterriza en /login. Durante ese
+  // tramo el overlay debe seguir montado aunque la sesión ya esté cerrada.
+  const navegandoRef = useRef(false);
   pathRef.current = pathname;
   confirmRef.current = confirm;
   cerrandoRef.current = cerrando;
@@ -137,11 +141,24 @@ export function useCierreSesion() {
   // Si la sesión ya terminó (logout), limpiar confirmación y animación para que el
   // overlay nunca quede fijo cubriendo la aplicación.
   useEffect(() => {
-    if (!user) {
-      setConfirm(null);
-      setCerrando(false);
-    }
+    if (user) return;
+    setConfirm(null);
+    // Salvedad: durante el cierre en curso el overlay tiene que aguantar hasta que la
+    // navegación a /login termine. Si se retira aquí, el dashboard se queda a la vista ya
+    // sin sesión y muestra "Acceso restringido: el dashboard completo es exclusivo de
+    // administrador" en el tiempo que tarda la navegación.
+    if (!navegandoRef.current) setCerrando(false);
   }, [user]);
+
+  // El Navbar vive en el layout raíz (src/app/layout.tsx), así que NO se desmonta al
+  // navegar: el overlay hay que retirarlo explícitamente al aterrizar en /login. Sin esto,
+  // el aviso "CERRANDO SESIÓN" queda congelado encima del formulario de inicio de sesión.
+  useEffect(() => {
+    if (pathname !== "/login") return;
+    navegandoRef.current = false;
+    setConfirm(null);
+    setCerrando(false);
+  }, [pathname]);
 
   /**
    * La sesión es interna: con la sesión abierta NO se puede saltar a una página de fuera
@@ -165,6 +182,7 @@ export function useCierreSesion() {
       const href = enlace.getAttribute("href") || "";
       // Enlaces externos, descargas, anclas o javascript: no se tocan.
       if (!href.startsWith("/")) return;
+      if (enlace.hasAttribute("download") || href.startsWith("/api/")) return;
       // Destino ya abierto en otra pestaña.
       if (enlace.target === "_blank") return;
       // Navegación dentro del propio sistema: se permite.
@@ -196,46 +214,44 @@ export function useCierreSesion() {
       ? "Administrador"
       : user.rol === "TITULADO"
         ? "Titulado"
-        : "Egresado"
+        : user.rol === "EGRESADO"
+          ? "Egresado"
+          : "Kardex"
     : "Sistema";
 
   const volverSeguimiento = () => {
-    // El botón home siempre inicia desde arriba (no restaura posición de scroll)
+    // El botón home siempre inicia desde arriba (no restaura posición de scroll).
     limpiarScrollGuardado();
+    // Con sesión abierta solo se pide la confirmación: el overlay decide si se sale o no.
+    // Antes, desde /login además se navegaba de golpe, saltándose esa confirmación.
     if (user) setConfirm("titulados");
     else router.push("/titulados");
-    
-    // Corregir: Si la ruta es /login, redirigir a /titulados para evitar bug de navegación
-    if (pathname === "/login") {
-      router.push("/titulados");
-    }
   };
 
   const pedir = (d: DestinoCierre) => setConfirm(d);
 
   /**
-   * Al aceptar, la sesión se cierra SIEMPRE en "/titulados" (Seguimiento a Titulados),
-   * nunca en la portada principal "/". La sesión es interna: ese es el único destino
-   * después de cerrar el cierre.
+   * Al aceptar, la sesión se cierra y se aterriza en "/login" con el formulario de CI y
+   * contraseña, que es lo mismo que ve un titulado o un egresado al cerrar su sesión.
+   *
+   * La navegación se hace con `replace` y no con `push`: la página cerrada no debe quedar
+   * en el historial, o el botón "atrás" devolvería a un dashboard que ya no tiene sesión.
+   * Tampoco se toca window.history a mano: replaceState sobre la ruta de destino después
+   * de un router.push hace que Next descarte la navegación pendiente, dejando la URL en
+   * /login con el dashboard todavía montado en pantalla.
    */
   const aceptar = () => {
-    const destino = "/login";
     origenRef.current = "";
-    setConfirm(null);
     limpiarScrollGuardado();
+    navegandoRef.current = true;
+    // El overlay cambia de la pregunta al aviso "CERRANDO SESIÓN" porque `cerrando` pasa a
+    // true; la pregunta se retira con `confirm` en null (ver contenidoOverlay).
+    setConfirm(null);
     setCerrando(true);
     setTimeout(async () => {
       await logout();
-      router.push(destino);
-      try {
-        window.history.replaceState(null, "", destino);
-      } catch {}
+      router.replace("/login");
     }, 1300);
-    
-    // Corregir: Si la ruta es /titulados, redirigir a /titulados (no a login) para evitar bug
-    if (pathname === "/titulados") {
-      router.push("/titulados");
-    }
   };
 
   const contenidoOverlay = (

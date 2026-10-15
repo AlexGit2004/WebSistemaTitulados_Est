@@ -10,15 +10,9 @@ import { z } from "zod";
  */
 
 /**
- * Cédula boliviana: 4 a 12 dígitos seguidos opcionalmente de dos letras (el sufijo del
- * departamento: LP, OR, CB, SC, PT, TJ, BE...).
- *
- * Se aceptan dos letras cualesquiera en vez de una lista fija: las extensiones
- * departamentales cambian con el tiempo y una lista desactualizada rechazaría cédulas
- * válidas, dejándolas fuera de la base. El requisito real de la especificación es que la
- * cédula sea única e irrepetible, no que el sufijo esté en un catálogo.
+ * CI numérico de 4 a 12 dígitos. No se almacenan ni aceptan sufijos alfabéticos.
  */
-const CI_REGEX = /^[0-9]{4,12}([A-Z]{2})?$/i;
+const CI_REGEX = /^[0-9]{4,12}$/;
 
 export const tipoEnum = z.enum(["TITULADO", "EGRESADO"]);
 export const generoEnum = z.enum(["MASCULINO", "FEMENINO", "PREFIERO_NO_DECIR"]);
@@ -34,6 +28,13 @@ export const inicioProcesoEnum = z.enum(["SI", "NO"]);
 export const motivoEnum = z.enum(["LABORAL", "ECONOMICO", "PERSONAL", "EN_PROCESO", "OTRO"]);
 export const estadoLaboralEnum = z.enum(["EMPLEADO", "DESEMPLEADO", "INDEPENDIENTE"]);
 export const sectorEnum = z.enum(["PUBLICO", "PRIVADO", "ACADEMICO", "ONG", "OTRO"]);
+export const nivelEstudioEnum = z.enum([
+  "TÉCNICO",
+  "LICENCIATURA",
+  "LICENCIATURA CON ESPECIALIZACIÓN",
+  "MAESTRÍA",
+  "POSGRADO",
+]);
 
 const anio = z.coerce.number().int().min(1970, "Año demasiado antiguo").max(2100, "Año inválido");
 
@@ -77,7 +78,7 @@ export const personaAdminSchema = z
       .string()
       .trim()
       .toUpperCase()
-      .regex(CI_REGEX, "Cédula inválida (se espera el número, con sufijo opcional)"),
+      .regex(CI_REGEX, "La cédula debe contener únicamente de 4 a 12 dígitos"),
     genero: generoEnum,
     semestreIngreso: semestre.nullable().optional(),
     semestreEgreso: semestre.nullable().optional(),
@@ -85,6 +86,9 @@ export const personaAdminSchema = z
     anioTitulacion: anio.nullable().optional(),
     modalidadTitulacion: modalidadEnum.nullable().optional(),
     areaEspecializacion: textoOpcional(200),
+    nivelEstudio: nivelEstudioEnum.nullable().optional(),
+    realizoCursoUltimos3Anos: z.boolean().nullable().optional(),
+    ultimoCurso: textoOpcional(200),
 
     planeaTitularse: planeaEnum.nullable().optional(),
     inicioProcesoTitulacion: inicioProcesoEnum.nullable().optional(),
@@ -122,6 +126,12 @@ export const personaAdminSchema = z
     observaciones: textoOpcional(2000),
   })
   .superRefine((v, ctx) => {
+    if (v.realizoCursoUltimos3Anos === true && !v.ultimoCurso) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["ultimoCurso"], message: "Indique el nombre del curso" });
+    }
+    if (v.realizoCursoUltimos3Anos === false && v.ultimoCurso) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["ultimoCurso"], message: "El curso sólo aplica si respondió SÍ" });
+    }
     // Si el sector es OTRO, exigir la descripción (important.md y spec del PDF).
     if (v.sectorTrabajo === "OTRO" && !v.sectorTrabajoOtro) {
       ctx.addIssue({
@@ -234,6 +244,9 @@ export const personaAutogestionSchema = z
       .optional(),
     redesSociales: textoOpcional(300),
     ciudadRegionTrabajo: textoOpcional(200),
+    nivelEstudio: nivelEstudioEnum.nullable().optional(),
+    realizoCursoUltimos3Anos: z.boolean().nullable().optional(),
+    ultimoCurso: textoOpcional(200),
     estadoLaboral: estadoLaboralEnum.optional(),
     sectorTrabajo: sectorEnum.nullable().optional(),
     sectorTrabajoOtro: textoOpcional(200),
@@ -245,9 +258,28 @@ export const personaAutogestionSchema = z
     planeaTitularse: planeaEnum.nullable().optional(),
     inicioProcesoTitulacion: inicioProcesoEnum.nullable().optional(),
     motivoNoTitulacion: motivoEnum.nullable().optional(),
+
+    // Consentimiento en la AUTOGESTIÓN del portal (misma exigencia que el alta pública).
+    //
+    // Aceptar el aviso una vez no cubre indefinidamente el tratamiento posterior: los
+    // datos que el titular envía desde el portal también se usan para los indicadores.
+    // Por eso la casilla es obligatoria en cada envío y viaja con la versión del aviso,
+    // de modo que quede constancia de qué texto se aceptó y cuándo (art. 130 CPE).
+    consentimientoPrivacidad: z.literal(true, {
+      errorMap: () => ({
+        message: "Debe aceptar el aviso de privacidad para guardar sus datos",
+      }),
+    }),
+    versionAvisoPrivacidad: z.string().trim().min(1).max(20),
   })
   .strict()
   .superRefine((v, ctx) => {
+    if (v.realizoCursoUltimos3Anos === true && !v.ultimoCurso) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["ultimoCurso"], message: "Indique el nombre del curso" });
+    }
+    if (v.realizoCursoUltimos3Anos === false && v.ultimoCurso) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["ultimoCurso"], message: "El curso sólo aplica si respondió SÍ" });
+    }
     if (v.sectorTrabajo === "OTRO" && !v.sectorTrabajoOtro) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -269,6 +301,18 @@ export const personaAutogestionSchema = z
   });
 
 /**
+ * Versión vigente del aviso de privacidad.
+ *
+ * Se incrementa al cambiar el texto del aviso. Se guarda en cada registro, no solo la
+ * fecha: sin esto no se puede distinguir "aceptó el aviso" de "aceptó OTRO aviso", ni
+ * saber a quién hay que volver a pedir consentimiento tras una actualización.
+ *
+ * Debe coincidir con `VERSION_AVISO_PRIVACIDAD` en `src/app/registro/page.tsx`, que es
+ * el texto que el titular realmente ve.
+ */
+export const VERSION_AVISO_PRIVACIDAD = "1.0.0";
+
+/**
  * Alta pública (decisión D5, opción B): lo que puede enviar un egresado sin sesión.
  *
  * Es deliberadamente MÁS RESTRICTIVO que `personaAdminSchema` en un punto —el correo es
@@ -288,7 +332,7 @@ export const personaRegistroPublicoSchema = z
       .string()
       .trim()
       .toUpperCase()
-      .regex(CI_REGEX, "Cédula inválida (se espera el número, con sufijo opcional)"),
+      .regex(CI_REGEX, "La cédula debe contener únicamente de 4 a 12 dígitos"),
     genero: generoEnum,
 
     // Obligatorio en el alta pública: es el buzón al que se manda el enlace.
@@ -326,6 +370,23 @@ export const personaRegistroPublicoSchema = z
     ocupacionCargo: textoOpcional(200),
     trabajaEnEstadistica: z.coerce.boolean().default(false),
     observaciones: textoOpcional(2000),
+
+    // ── Gestión del consentimiento (ISO/IEC 27701:2025 · Ley 1405 art. 5.1.a) ──
+    //
+    // El consentimiento tiene que ser EXPRESO y demostrable. Un `true` sin marcar en la
+    // pantalla, o marcado en la pantalla pero sin llegar al servidor, no es consentimiento:
+    // es una inferencia. Por eso el campo es obligatorio y tiene que valer `true`.
+    //
+    // `literal` no es un campo decorativo: obliga al cliente a enviar el texto exacto de
+    // la versión que se mostró. Si el aviso cambia y el cliente no se actualiza, el valor
+    // no coincide y el registro se rechaza, en lugar de aceptarse bajo un aviso viejo
+    // que el titular no ha leído.
+    consentimientoPrivacidad: z.literal(true, {
+      errorMap: () => ({
+        message: "Debe aceptar el aviso de privacidad para registrar sus datos",
+      }),
+    }),
+    versionAvisoPrivacidad: z.string().trim().min(1).max(20),
   })
   .strict()
   .superRefine((v, ctx) => {
@@ -411,7 +472,7 @@ export const usuarioSchema = z.object({
     .regex(CI_REGEX, "Cédula inválida")
     .nullable()
     .optional(),
-  rol: z.enum(["admin", "usuario"]).default("admin"),
+  rol: z.enum(["admin", "usuario", "KARDEX"]).default("admin"),
   estado: z.enum(["activo", "inactivo", "bloqueado"]).default("activo"),
 });
 
@@ -422,7 +483,74 @@ export const usuarioConPasswordSchema = usuarioSchema.extend({
 export const loginSchema = z.object({
   ci: z.string().trim().min(1, "Ingrese su CI o correo"),
   password: z.string().max(200).optional(),
+  turnstileToken: z.string().optional().nullable(),
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Esquemas de las rutas de escritura que aún no tenían uno
+//
+// Una ruta que escribe sin esquema acepta tipos que nadie se supone que mande:
+// un `tipo: 999` que revienta el ENUM en PostgreSQL y produce un 500 en vez de un
+// 400, o un cuerpoarray donde se espera un objeto. Estos esquemas cierran esa puerta:
+// lo que no cumple, no llega a la base de datos.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const noticiaTipoEnum = z.enum([
+  "noticia_institucional",
+  "curso_evento",
+  "noticia_social",
+]);
+export const noticiaCategoriaEnum = z.enum(["noticia", "convocatoria"]);
+
+/** Cuerpo de alta/edición de noticias y cursos. `estricto` por diseño. */
+export const noticiaSchema = z
+  .object({
+    titulo: z.string().trim().min(1, "El título es obligatorio").max(250, "Máximo 250 caracteres"),
+    cuerpo: z.string().trim().min(1, "La descripción es obligatoria").max(8000),
+    tipo: noticiaTipoEnum,
+    categoria: noticiaCategoriaEnum,
+    fecha: z
+      .string()
+      .trim()
+      .refine((f) => !Number.isNaN(new Date(f).getTime()), "La fecha es obligatoria"),
+    publicado: z.coerce.boolean().optional(),
+    enlace: z.string().trim().max(500).nullable().optional(),
+    destacado: z.coerce.boolean().optional(),
+    imagenUrl: z.string().trim().max(500).nullable().optional(),
+  })
+  .strict();
+
+/**
+ * Editar una noticia acepta un subconjunto: no se puede cambiar el id ni la fecha de
+ * creación desde el cliente.
+ */
+export const noticiaActualizacionSchema = noticiaSchema.partial().strict();
+
+/** Solicitud de enlace de descarga firmado (admin). */
+export const enlaceDescargaSchema = z
+  .object({
+    destino: z.enum(["personas", "dashboard", "pdf"], {
+      errorMap: () => ({ message: "Destino no permitido" }),
+    }),
+    params: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+  })
+  .strict();
+
+/** Solicitud de supresión de datos del titular (derecho de supresión). */
+export const supresionDatosSchema = z
+  .object({
+    motivo: z.string().trim().min(10, "Explique brevemente el motivo").max(1000),
+    confirmacion: z.literal(true, {
+      errorMap: () => ({ message: "Debe confirmar la solicitud" }),
+    }),
+  })
+  .strict();
+
+/** Cierre de sesión: no hay cuerpo, pero se valida que no traiga campos de más. */
+export const cierreSesionSchema = z.object({}).passthrough();
+
+export type NoticiaInput = z.infer<typeof noticiaSchema>;
+export type EnlaceDescargaInput = z.infer<typeof enlaceDescargaSchema>;
 
 export type PersonaAdminInput = z.infer<typeof personaAdminSchema>;
 export type PersonaRegistroPublicoInput = z.infer<typeof personaRegistroPublicoSchema>;

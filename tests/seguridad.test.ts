@@ -117,12 +117,12 @@ test("el token incluye la CI, que es lo que autoriza al titular", async () => {
   const token = await crearToken({
     sub: 42,
     rol: "EGRESADO",
-    ci: "8341920LP",
+    ci: "8341920",
     nombre: "Lucía",
     correo: null,
   });
   const s = await verificarToken(token);
-  assert.equal(s?.ci, "8341920LP");
+  assert.equal(s?.ci, "8341920");
   assert.equal(s?.rol, "EGRESADO");
   assert.equal(s?.sub, 42);
 });

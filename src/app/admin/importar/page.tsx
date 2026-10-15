@@ -25,8 +25,8 @@ interface Resultado {
 }
 
 const PLANTILLA = `tipo,nombres_apellidos,cedula_identidad,genero,semestre_ingreso,semestre_egreso,anio_egreso,anio_titulacion,modalidad_titulacion,area_especializacion,planea_titularse,inicio_proceso_titulacion,motivo_no_titulacion,correo_electronico,telefono,redes_sociales,ciudad_region_trabajo,estado_laboral,sector_trabajo,sector_trabajo_otro,ocupacion_cargo,trabaja_en_estadistica,tiempo_egreso_titulacion_meses,tiempo_insercion_laboral_meses,observaciones
-TITULADO,"Ana María Ñuñez Rojas",1234567LP,FEMENINO,I/2016,II/2020,2020,2021,Tesis,Bioestadística,,,,ana@example.com,71234567,linkedin.com/in/ana,La Paz Bolivia,EMPLEADO,PUBLICO,,Analista de Datos,SI,12,3,
-EGRESADO,"Luis Carlos Pérez Soto",7654321LP,MASCULINO,II/2018,I/2023,2023,,,,SI,NO,LABORAL,luis@example.com,70123456,,Santa Cruz Bolivia,EMPLEADO,OTRO,Gobierno municipal,Técnico Estadístico,SI,,4,`;
+TITULADO,"Ana María Ñuñez Rojas",1234567,FEMENINO,I/2016,II/2020,2020,2021,Tesis,Bioestadística,,,,ana@example.com,71234567,linkedin.com/in/ana,La Paz Bolivia,EMPLEADO,PUBLICO,,Analista de Datos,SI,12,3,
+EGRESADO,"Luis Carlos Pérez Soto",7654321,MASCULINO,II/2018,I/2023,2023,,,,SI,NO,LABORAL,luis@example.com,70123456,,Santa Cruz Bolivia,EMPLEADO,OTRO,Gobierno municipal,Técnico Estadístico,SI,,4,`;
 
 export default function AdminImportarPage() {
   const inputRef = useRef<HTMLInputElement>(null);

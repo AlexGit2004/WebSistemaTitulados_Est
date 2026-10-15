@@ -1,63 +1,117 @@
-# Dependencias
+# ─────────────────────────────────────────────────────────────────
+# Sistema de Seguimiento a Titulados y Egresados — .gitignore
+#
+# Criterio: se versiona SOLO lo que el proyecto necesita para funcionar.
+# Todo lo que se regenera con un comando, o que es basura de máquina
+# local, queda afuera.
+#
+# Excepción deliberada: `datos_prueba.csv` SÍ se versiona (ver más abajo),
+# porque `pnpm seed:masivo` lo carga directo y sin él no se puede
+# reproducir el juego de datos de prueba.
+# ─────────────────────────────────────────────────────────────────
+
+# ── Dependencias ──────────────────────────────────────────────────
 node_modules/
 .pnpm-store/
 
-# Build de Next.js
+# ── Build de Next.js ──────────────────────────────────────────────
+# Todo lo que hay acá lo genera `pnpm dev` / `pnpm build`.
 .next/
 out/
 build/
+dist/
 next-env.d.ts.timestamp
+*.tsbuildinfo
 
-# Variables de entorno — NUNCA subir estos archivos
+# ── Variables de entorno ──────────────────────────────────────────
+# NUNCA subir: contienen contraseñas y SESSION_SECRET.
 .env
 .env.local
 .env.development.local
 .env.production.local
 .env*.local
 
-# Migraciones generadas (opcional: descomentar si se decide no versionarlas)
-# drizzle/meta/_journal.json.bak
-*sql.gz
+# `.env.example` SÍ se versiona: es la plantilla documentada.
+# `.env` no, porque trae el DB_PORT real y credenciales locales.
 
-# Logs
+# ── Logs ──────────────────────────────────────────────────────────
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-*.log
+*.pid
+*.pid.lock
 
-# Sistema operativo
+# ── Sistema operativo / editores ──────────────────────────────────
 .DS_Store
 Thumbs.db
 Desktop.ini
-
-# Editores
 .vscode/*
 !.vscode/extensions.json
 .idea/
 *.swp
 *.swo
+*~
+.vs/
+*.code-workspace
 
-# Certificados y claves — nunca deben subirse
-*.pem
-*.key
-*.crt
-*.p12
-*.pfx
-
-# Datos de base de datos / backups
+# ── Datos de la base de datos y archivos subidos por usuarios ────
+# Los genera la aplicación en runtime; nada de esto va al repo.
+backups/
+storage/
 *.dump
 *.sql.gz
-backups/
 
-# Archivos GENERADOS, no fuente. Se recrean con:
-#   pnpm generar:datos   -> vuelve a crear datos_prueba.csv
-datos_prueba.csv
-*.csv
+# ── Credenciales y notas personales ───────────────────────────────
+# credencial.txt tiene las contraseñas reales de admin/titulado/KARDEX.
+# Las de prueba salen de `pnpm seed`; las reales, de un gestor de
+# secretos. Este archivo nunca va al repositorio.
+credencial.txt
+*.secret
 
-# Reportes de prueba generados por los tests
+# ── Python: scripts_generar_seed.py vive en el repo, esto no ──────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# `pruebascalidad/` guarda resultados de corrida, no código del sistema.
+
+# ── Reportes y artefactos de pruebas de calidad ───────────────────
+# Se generan corriendo los tests; son resultados, no fuente.
 reporte_prueba.pdf
-*.pdf
+resultados.json
+resultados_con_descripcion.json
+resultadopruebas.md
+*.docx
+pruebascalidad/src/bk/
+venv-linux-3.12-paquetes.txt
 
-# Compresiones del proyecto
+# ── Compresiones ──────────────────────────────────────────────────
 *.zip
+*.tar
+*.tar.gz
+*.7z
+*.rar
+
+# ── Datos de prueba ──────────────────────────────────────────────
+# `datos_prueba.csv` NO se ignora a propósito: `pnpm seed:masivo` lo
+# lee tal cual (`leerCsv(fs.readFileSync("datos_prueba.csv"))`), así
+# que versionarlo es lo que permite que otra personaclone y ejecute
+# el seed masivo sin tener que generar el CSV antes.
+# Para regenerarlo: `pnpm generar:datos`
+
+# Cualquier OTRO csv sí es temporal (exportaciones, intercambios).
+*.csv
+!datos_prueba.csv
+
+# ── PDFs generados ────────────────────────────────────────────────
+# Los PDF de reportes se generan al vuelo.
+*.pdf
+!reglas/*.pdf

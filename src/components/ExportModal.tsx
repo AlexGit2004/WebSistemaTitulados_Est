@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X, Download, FileSpreadsheet, FileText, Loader2 } from "lucide-react";
+import { X, Download, FileSpreadsheet, FileText, Loader2, ShieldCheck } from "lucide-react";
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -10,6 +10,8 @@ interface ExportModalProps {
   title: string;
   formato: "excel" | "csv";
   params: URLSearchParams;
+  /** Aviso de seguridad que se muestra sobre los botones. */
+  aviso?: string;
 }
 
 type PreviewRow = Record<string, string | number>;
@@ -21,6 +23,7 @@ export default function ExportModal({
   title,
   formato,
   params,
+  aviso,
 }: ExportModalProps) {
   const [data, setData] = useState<PreviewRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -51,9 +54,13 @@ export default function ExportModal({
 
   const columns = data.length > 0 ? Object.keys(data[0]!) : [];
 
-  const handleConfirm = () => {
+  /**
+ * No se cierra el modal aquí: `onConfirm` es asíncrono (pide el enlace temporal al
+ * servidor) y cerrarlo de inmediato se tragaría el mensaje de error si la descarga
+ * falla. Quien lo cierra es el propio callback cuando la llamada termina bien.
+ */
+const handleConfirm = () => {
     onConfirm();
-    onClose();
   };
 
   return (
@@ -144,20 +151,28 @@ export default function ExportModal({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl text-sm font-bold text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-600 transition"
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={handleConfirm}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white bg-emerald-700 hover:bg-emerald-800 transition"
-          >
-            <Download className="w-4 h-4" />
-            Sí, exportar datos
-          </button>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-6 py-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+          {aviso && (
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 max-w-sm leading-relaxed">
+              <ShieldCheck className="w-3.5 h-3.5 inline mr-1 -mt-0.5 text-emerald-600" />
+              {aviso}
+            </p>
+          )}
+          <div className="flex items-center justify-end gap-3">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 rounded-xl text-sm font-bold text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-600 transition"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleConfirm}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white bg-emerald-700 hover:bg-emerald-800 transition"
+            >
+              <Download className="w-4 h-4" />
+              Sí, exportar datos
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -54,7 +54,23 @@ test("el token de sesión se crea y se verifica", async () => {
   const sesion = { sub: 1, rol: "admin" as const, ci: "", nombre: "Admin", correo: null };
   const token = await crearToken(sesion);
   const leida = await verificarToken(token);
-  assert.deepEqual(leida, sesion);
+  assert.ok(leida, "el token debe verificarse");
+  assert.equal(leida.sub, sesion.sub);
+  assert.equal(leida.rol, sesion.rol);
+  assert.ok(leida.nonce, "el token debe llevar un nonce aleatorio (OWASP Session Management)");
+  assert.ok(
+    String(leida.nonce).length >= 20,
+    "el nonce debe tener entropía suficiente (16 bytes en base64url)"
+  );
+});
+
+test("dos inicios de sesión del mismo usuario dan tokens distintos", async () => {
+  // El nonce es lo que impide que el identificador de sesión sea predecible: sin él el
+  // token solo dependería de datos conocidos más una marca de tiempo en milisegundos.
+  const sesion = { sub: 1, rol: "admin" as const, ci: "", nombre: "Admin", correo: null };
+  const a = await crearToken(sesion, 1_700_000_000_000);
+  const b = await crearToken(sesion, 1_700_000_000_000);
+  assert.notEqual(a, b, "el mismo usuario en el mismo instante debe obtener tokens distintos");
 });
 
 test("un token adulterado se rechaza", async () => {
@@ -95,8 +111,8 @@ test("el nombre de la cookie es el esperado", async () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 test("normalizarCi unifica formato", async () => {
-  assert.equal(normalizarCi(" 6893412lp "), "6893412LP");
-  assert.equal(normalizarCi("6893412 LP"), "6893412LP");
+  assert.equal(normalizarCi(" 6893412lp "), "6893412");
+  assert.equal(normalizarCi("6893412 LP"), "6893412");
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -106,7 +122,7 @@ test("normalizarCi unifica formato", async () => {
 const EGRESADO_BASE = {
   tipo: "EGRESADO",
   nombresApellidos: "Lucía Belén Gutierrez Morales",
-  cedulaIdentidad: "8341920LP",
+  cedulaIdentidad: "8341920",
   genero: "FEMENINO",
   semestreIngreso: "I/2018",
   semestreEgreso: "II/2023",
@@ -180,7 +196,7 @@ test("egresado: es obligatorio indicar si planea titularse", async () => {
 const TITULADO_BASE = {
   tipo: "TITULADO",
   nombresApellidos: "Carlos Alberto Mendoza Ramos",
-  cedulaIdentidad: "6893412LP",
+  cedulaIdentidad: "6893412",
   genero: "MASCULINO",
   semestreIngreso: "I/2016",
   semestreEgreso: "II/2020",
@@ -207,6 +223,17 @@ test("titulado completo es válido", async () => {
     areaEspecializacion: "Bioestadística",
   });
   assert.equal(r.success, true);
+});
+
+test("grado usa únicamente los valores permitidos y curso reciente exige nombre", async () => {
+  const base = { ...TITULADO_BASE, anioTitulacion: 2021, modalidadTitulacion: "Tesis" };
+  const niveles = ["TÉCNICO", "LICENCIATURA", "LICENCIATURA CON ESPECIALIZACIÓN", "MAESTRÍA", "POSGRADO"];
+  for (const nivelEstudio of niveles) {
+    assert.equal(personaAdminSchema.safeParse({ ...base, nivelEstudio }).success, true);
+  }
+  assert.equal(personaAdminSchema.safeParse({ ...base, realizoCursoUltimos3Anos: true }).success, false);
+  assert.equal(personaAdminSchema.safeParse({ ...base, realizoCursoUltimos3Anos: true, ultimoCurso: "Curso R" }).success, true);
+  assert.equal(personaAdminSchema.safeParse({ ...base, realizoCursoUltimos3Anos: false, ultimoCurso: "Curso R" }).success, false);
 });
 
 test("titulado: no puede tener los campos de titulación de egresado", async () => {
@@ -259,15 +286,15 @@ test("no se admite descripción de 'Otro' si el sector no es OTRO", async () => 
 // Cédula única y formatos
 // ─────────────────────────────────────────────────────────────────────────────
 
-test("la cédula se normaliza a mayúsculas", async () => {
+test("la cédula válida sólo contiene dígitos", async () => {
   const r = personaAdminSchema.safeParse({
     ...TITULADO_BASE,
-    cedulaIdentidad: "6893412lp",
+    cedulaIdentidad: "6893412",
     anioTitulacion: 2021,
     modalidadTitulacion: "Tesis",
   });
   assert.equal(r.success, true);
-  if (r.success) assert.equal(r.data.cedulaIdentidad, "6893412LP");
+  if (r.success) assert.equal(r.data.cedulaIdentidad, "6893412");
 });
 
 test("cédulas con formato inválido se rechazan", async () => {
@@ -282,7 +309,7 @@ test("cédulas con formato inválido se rechazan", async () => {
   }
 });
 
-test("cédulas bolivianas con distintos sufijos son aceptadas", async () => {
+test("cédulas con sufijo alfabético se rechazan", async () => {
   for (const ci of ["6893412LP", "1234567SC", "8765432CB", "11223344TQ"]) {
     const r = personaAdminSchema.safeParse({
       ...TITULADO_BASE,
@@ -290,7 +317,7 @@ test("cédulas bolivianas con distintos sufijos son aceptadas", async () => {
       anioTitulacion: 2021,
       modalidadTitulacion: "Tesis",
     });
-    assert.equal(r.success, true, `debería aceptar "${ci}"`);
+    assert.equal(r.success, false, `debería rechazar "${ci}"`);
   }
 });
 
@@ -334,22 +361,46 @@ test("autogestión acepta los campos dinámicos", async () => {
     sectorTrabajo: "PRIVADO",
     ciudadRegionTrabajo: "Santa Cruz, Bolivia",
     trabajaEnEstadistica: true,
+    consentimientoPrivacidad: true,
+    versionAvisoPrivacidad: "1.0.0",
   });
   assert.equal(r.success, true);
+});
+
+test("autogestión EXIGE el consentimiento del aviso de privacidad", async () => {
+  // El portal del titular también trata datos personales: sin casilla marcada, el
+  // servidor rechaza el guardado. Validarlo solo en el formulario no bastaría, porque
+  // un `fetch` a mano saltaría el componente.
+  const sinConsentimiento = personaAutogestionSchema.safeParse({
+    correoElectronico: "nuevo@example.com",
+  });
+  assert.equal(sinConsentimiento.success, false, "falta el consentimiento");
+
+  const sinVersion = personaAutogestionSchema.safeParse({
+    correoElectronico: "nuevo@example.com",
+    consentimientoPrivacidad: true,
+  });
+  assert.equal(sinVersion.success, false, "falta la versión del aviso aceptado");
 });
 
 test("autogestión NO admite campos K", async () => {
   const r = personaAutogestionSchema.safeParse({
     correoElectronico: "nuevo@example.com",
+    consentimientoPrivacidad: true,
+    versionAvisoPrivacidad: "1.0.0",
     anioTitulacion: 2021,
     modalidadTitulacion: "Tesis",
-    cedulaIdentidad: "1111111LP",
+    cedulaIdentidad: "1111111",
   });
   assert.equal(r.success, false, "el titular no puede enviar campos de Kardex");
 });
 
 test("autogestión valida el correo", async () => {
-  const r = personaAutogestionSchema.safeParse({ correoElectronico: "no-es-correo" });
+  const r = personaAutogestionSchema.safeParse({
+    correoElectronico: "no-es-correo",
+    consentimientoPrivacidad: true,
+    versionAvisoPrivacidad: "1.0.0",
+  });
   assert.equal(r.success, false);
 });
 
@@ -358,7 +409,7 @@ test("autogestión valida el correo", async () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 test("login acepta CI sola o CI + contraseña", async () => {
-  assert.equal(loginSchema.safeParse({ ci: "6893412LP" }).success, true);
+  assert.equal(loginSchema.safeParse({ ci: "6893412" }).success, true);
   assert.equal(loginSchema.safeParse({ ci: "admin@umsa.bo", password: "admin123" }).success, true);
 });
 
@@ -371,6 +422,7 @@ test("alta de usuario exige contraseña de 8 caracteres o más", async () => {
   const base = { nombre: "Coordinador", correo: "coord@umsa.bo" };
   assert.equal(usuarioConPasswordSchema.safeParse({ ...base, password: "corta" }).success, false);
   assert.equal(usuarioConPasswordSchema.safeParse({ ...base, password: " sufficiently-long " }).success, true);
+  assert.equal(usuarioConPasswordSchema.safeParse({ ...base, password: "sufficiently-long", rol: "KARDEX" }).success, true);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

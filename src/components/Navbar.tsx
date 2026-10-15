@@ -18,7 +18,7 @@ export default function Navbar() {
   const isEstadistica = pathname === "/";
   const isTitulados = pathname === "/titulados" || pathname.startsWith("/titulados") || pathname.startsWith("/kpis/");
   // Páginas donde se muestra el botón home secundario hacia el inicio del seguimiento
-  const isSeguimientoSub = pathname === "/titulados" || pathname === "/login" || pathname === "/admin/dashboard" || pathname.startsWith("/portal/") || pathname.startsWith("/kpis/") || pathname.startsWith("/noticias/");
+  const isSeguimientoSub = pathname === "/titulados" || pathname === "/login" || pathname === "/admin/dashboard" || pathname.startsWith("/portal/") || pathname.startsWith("/kpis/") || pathname.startsWith("/noticias/") || pathname.startsWith("/kardex/");
 
   useEffect(() => {
     const savedTheme = localStorage.getItem("theme") as "light" | "dark" | null;
@@ -73,13 +73,10 @@ export default function Navbar() {
 
   const menuItems = [
     { label: "Inicio", href: "/", active: isEstadistica },
-    { label: "Institucional", href: null },
-    { label: "Pregrado", href: null },
-    { label: "Postgrado", href: null },
-    { label: "Estudiantes", href: null },
-    { label: "Investigación", href: null },
-    { label: "Recursos", href: null },
-    { label: "Contacto", href: null },
+    { label: "Seguimiento", href: "/titulados", active: pathname === "/titulados" },
+    { label: "Indicadores", href: "/kpis/titulados", active: pathname.startsWith("/kpis/") },
+    { label: "Noticias", href: "/titulados#noticias", active: false },
+    ...(user?.rol === "KARDEX" ? [{ label: "Solicitudes", href: "/kardex/solicitudes", active: pathname.startsWith("/kardex") }] : []),
   ];
 
   const leyendaSeguimiento = !user
@@ -88,31 +85,34 @@ export default function Navbar() {
       ? "Cerrar sesión · Administrador"
       : user.rol === "TITULADO"
         ? "Cerrar sesión · Titulado"
-        : "Cerrar sesión · Egresado";
+        : user.rol === "EGRESADO"
+          ? "Cerrar sesión · Egresado"
+          : "Cerrar sesión · Kardex";
 
   const rolLabel = user
     ? user.rol === "admin"
       ? "Administrador"
       : user.rol === "TITULADO"
         ? "Titulado"
-        : "Egresado"
+        : user.rol === "EGRESADO"
+          ? "Egresado"
+          : "Kardex"
     : "Sistema";
 
   return (
     <>
       {/* Espacio reservado para el navbar fijo (se mantiene visible al deslizar) */}
-      <div className="h-[56px] w-full" aria-hidden="true" />
-      <nav className="fixed top-0 inset-x-0 z-50 h-[56px] w-full border-b text-white" style={{ backgroundColor: "var(--nav-bg)", borderColor: "var(--nav-border)" }}>
+      <div className="h-[56px] w-full" aria-hidden="true" data-nav-espaciador />
+      <nav data-navbar className="fixed top-0 inset-x-0 z-50 h-[56px] w-full border-b text-white" style={{ backgroundColor: "var(--nav-bg)", borderColor: "var(--nav-border)" }}>
       <div className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-[56px] gap-2">
-          {/* Logo original */}
-          <Link href="/" className="flex items-center gap-3 shrink-0 min-w-0">
+          <Link href="/titulados" className="flex items-center gap-3 shrink-0 min-w-0">
             <div className="w-10 h-10 flex items-center justify-center shadow-sm shrink-0 p-1 overflow-hidden">
-              <img src="/LogoCarrera.png" alt="Logo Carrera Estadística" className="w-full h-full object-contain" />
+              <img src="/2png/logo-seguimiento.png" alt="Símbolo de Seguimiento a Titulados" className="w-full h-full object-contain" />
             </div>
             <div className="leading-tight hidden md:block">
-              <p className="text-[13px] font-black tracking-tight leading-none">CARRERA DE ESTADÍSTICA</p>
-              <p className="text-[11px] font-semibold text-white/70 tracking-wide hidden 2xl:block">Facultad de Ciencias Puras y Naturales</p>
+              <p className="text-[12px] font-black tracking-tight leading-none">SEGUIMIENTO A TITULADOS</p>
+              <p className="text-[13px] font-normal text-white/70 tracking-wide hidden xl:block">Carrera de Estadística · UMSA</p>
             </div>
           </Link>
 
@@ -123,7 +123,7 @@ export default function Navbar() {
                 <li key={item.label}>
                   <Link
                     href={item.href}
-                    className={`px-2 xl:px-2.5 py-2 text-[11px] xl:text-xs font-bold tracking-wide rounded-lg transition whitespace-nowrap ${
+                    className={`px-2 xl:px-2.5 py-2 text-sm xl:text-[15px] font-normal tracking-wide rounded-lg transition whitespace-nowrap ${
                       item.active
                         ? "bg-white/15 text-white"
                         : "text-white/80 hover:text-white hover:bg-white/10"
@@ -134,7 +134,7 @@ export default function Navbar() {
                 </li>
               ) : (
                 <li key={item.label}>
-                  <span className="px-2 xl:px-2.5 py-2 text-[11px] xl:text-xs font-bold tracking-wide text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition cursor-pointer whitespace-nowrap">
+                    <span className="px-2 xl:px-2.5 py-2 text-sm xl:text-[15px] font-normal tracking-wide text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition cursor-pointer whitespace-nowrap">
                     {item.label}
                   </span>
                 </li>
@@ -182,7 +182,7 @@ export default function Navbar() {
                 </span>
               </div>
             ) : !isEstadistica ? (
-              <Link href="/login" className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 bg-transparent text-white/90 text-xs font-bold hover:text-white shrink-0 min-h-[40px]">
+              <Link href="/login" className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 bg-transparent text-white/90 text-[15px] font-normal hover:text-white shrink-0 min-h-[40px]">
                 <LogIn className="w-4 h-4 shrink-0" />
                 <span className="hidden 2xl:inline">Ingresar</span>
               </Link>
@@ -205,14 +205,14 @@ export default function Navbar() {
                 <li key={item.label}>
                   <Link
                     href={item.href}
-                    className={`block px-3 py-3 rounded-xl text-sm font-bold transition ${item.active ? "bg-white text-[var(--nav-bg)]" : "text-white hover:bg-white/10"}`}
+                    className={`block px-3 py-3 rounded-xl text-[17px] font-normal transition ${item.active ? "bg-white text-[var(--nav-bg)]" : "text-white hover:bg-white/10"}`}
                   >
                     {item.label}
                   </Link>
                 </li>
               ) : (
                 <li key={item.label}>
-                  <span className="block px-3 py-3 rounded-xl text-sm font-semibold text-white/60 cursor-default opacity-70">
+                  <span className="block px-3 py-3 rounded-xl text-[17px] font-normal text-white/60 cursor-default opacity-70">
                     {item.label} ▾
                   </span>
                 </li>
@@ -221,7 +221,7 @@ export default function Navbar() {
             {/* Con sesión activa tampoco hay salida en el menú desplegable. */}
             {isSeguimientoSub && !user && (
               <li>
-                <button onClick={volverSeguimiento} className="w-full text-left px-3 py-3 rounded-xl text-sm font-bold text-white hover:bg-white/10">
+                <button onClick={volverSeguimiento} className="w-full text-left px-3 py-3 rounded-xl text-[17px] font-normal text-white hover:bg-white/10">
                   ← Inicio del seguimiento
                 </button>
               </li>

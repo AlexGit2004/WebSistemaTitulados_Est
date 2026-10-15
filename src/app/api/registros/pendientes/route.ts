@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { personas, verificaciones } from "@/db/schema";
-import { and, count, desc, eq, isNull, sql, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, sql } from "drizzle-orm";
 import { exigirAdmin, errorInterno } from "@/lib/guards";
-import { registrarAuditoria } from "@/lib/auditoria";
+import { aValorEnum } from "@/lib/filtros";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +19,6 @@ export const dynamic = "force-dynamic";
  * una cédula inventada y se rechaza; una verificada solo necesita que alguien revise los
  * datos que declaró.
  */
-
 export async function GET(req: NextRequest) {
   const denegado = await exigirAdmin(req);
   if (denegado) return denegado;
@@ -27,7 +26,6 @@ export async function GET(req: NextRequest) {
   try {
     const sp = new URL(req.url).searchParams;
     const estado = (sp.get("estado") ?? "PENDIENTE").toUpperCase();
-
     if (!["PENDIENTE", "RECHAZADO", "VALIDADO"].includes(estado)) {
       return NextResponse.json({ error: "Estado inválido" }, { status: 400 });
     }
@@ -36,7 +34,9 @@ export async function GET(req: NextRequest) {
       const [conteo] = await db
         .select({ n: count() })
         .from(personas)
-        .where(sql`${personas.estadoRegistro} in ('PENDIENTE','RECHAZADO') and ${personas.activo} = true`);
+        .where(
+          sql`${personas.estadoRegistro} in ('PENDIENTE','RECHAZADO') and ${personas.activo} = true`
+        );
       const [verificados] = await db
         .select({ n: count() })
         .from(personas)
@@ -47,14 +47,17 @@ export async function GET(req: NextRequest) {
             sql`exists (select 1 from ${verificaciones} v where v.id_persona = ${personas.id} and v.usada_en is not null)`
           )
         );
-
       return NextResponse.json({
         pendientes: conteo?.n ?? 0,
         pendientesVerificados: verificados?.n ?? 0,
       });
     }
 
-    const conds: SQL[] = [eq(personas.estadoRegistro, estado as any), eq(personas.activo, true)];
+    // El estado ya se validó contra la lista cerrada de arriba; la conversión al tipo
+    // del ENUM es segura y evita el `as any` que convertía un 400 en un 500 de la BD.
+    const estadoEnum = aValorEnum(personas.estadoRegistro, estado) ?? "PENDIENTE";
+
+    const conds = [eq(personas.estadoRegistro, estadoEnum), eq(personas.activo, true)];
 
     const filas = await db
       .select({
@@ -80,8 +83,8 @@ export async function GET(req: NextRequest) {
         motivoRechazo: personas.motivoRechazo,
         creadoEn: personas.creadoEn,
         // ¿Abrió el enlace de verificación del correo?
-        verificado: sql<boolean>`exists (select 1 from ${verificaciones} v where v.id_persona = ${personas.id} and v.usada_en is not null)`,
-        enlaceExpirado: sql<boolean>`exists (select 1 from ${verificaciones} v where v.id_persona = ${personas.id} and v.usada_en is null and v.expira_en < now())`,
+        verificado: sql`exists (select 1 from ${verificaciones} v where v.id_persona = ${personas.id} and v.usada_en is not null)`,
+        enlaceExpirado: sql`exists (select 1 from ${verificaciones} v where v.id_persona = ${personas.id} and v.usada_en is null and v.expira_en < now())`,
       })
       .from(personas)
       .where(and(...conds))

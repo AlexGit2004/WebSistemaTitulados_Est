@@ -34,24 +34,15 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
 } from "recharts";
 import { useAuth } from "@/lib/auth";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import ExportModal from "@/components/ExportModal";
-
-const COLORS_LIGHT = [
-  "#1e3a8a", // Azul UMSA
-  "#059669", // Esmeralda
-  "#d97706", // Ámbar
-  "#7c3aed", // Púrpura
-  "#dc2626", // Rojo
-  "#0891b2", // Cyan
-  "#4b5563", // Gris
-];
+import GraficoSector from "@/components/GraficoSector";
+import { useTemaOscuro } from "@/lib/useTemaOscuro";
+import { estilosTooltip } from "@/lib/graficoTema";
+import { SUBTITULO_SECTOR } from "@/lib/sectores";
 
 interface DashboardData {
   kpisTitulados: {
@@ -89,7 +80,7 @@ export default function AdminDashboardPage() {
   // Filtros
   const [sector, setSector] = useState<string>("TODOS");
   const [modalidad, setModalidad] = useState<string>("TODAS");
-  const [sectorHover, setSectorHover] = useState<number | null>(null);
+  const oscuro = useTemaOscuro();
   const [anioMin, setAnioMin] = useState<string>("");
   const [anioMax, setAnioMax] = useState<string>("");
 
@@ -99,6 +90,7 @@ export default function AdminDashboardPage() {
     formato: "excel" | "csv";
     params: URLSearchParams;
   }>({ open: false, formato: "excel", params: new URLSearchParams() });
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -137,19 +129,48 @@ export default function AdminDashboardPage() {
 
   const handleExport = (formato: "excel" | "csv") => {
     const params = new URLSearchParams();
-    params.append("tipo", vista);
-    params.append("formato", formato);
+    params.append("tipo", vista === "TITULADOS" ? "TITULADOS" : "EGRESADOS");
     if (sector !== "TODOS") params.append("sector", sector);
     if (modalidad !== "TODAS") params.append("modalidad", modalidad);
     if (anioMin) params.append("anioMin", anioMin);
     if (anioMax) params.append("anioMax", anioMax);
 
+    // `formato` NO viaja en los params: lo elige el endpoint que firma el enlace, para
+    // que el cliente no pueda obtener una firma y usarla con otro formato distinto.
+    setExportError(null);
     setExportModal({ open: true, formato, params });
   };
 
-  const confirmExport = () => {
-    const url = `/api/exportar?${exportModal.params.toString()}`;
-    window.open(url, "_blank");
+  /**
+   * Pide al servidor una URL de descarga TEMPORAL y la abre.
+   *
+   * Antes se abría `/api/exportar?params` directamente. Eso ya no funciona, y no por
+   * un capricho del servidor: una URL de descarga protegida solo con cookie se queda en
+   * el historial del navegador y en el log del proxy, y quien la lea después descarga la
+   * base de datos completa sin tener sesión. El enlace firmado caduca en 5 minutos y
+   * está atado a este usuario (ISO/IEC 27001:2022, A.8.12).
+   */
+  const confirmExport = async () => {
+    setExportError(null);
+    try {
+      const res = await fetch("/api/exportar/enlace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          destino: exportModal.formato,
+          params: Object.fromEntries(exportModal.params.entries()),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setExportError(data.error ?? "No se pudo generar el enlace de descarga.");
+        return;
+      }
+      window.open(data.url, "_blank");
+      setExportModal((m) => ({ ...m, open: false }));
+    } catch {
+      setExportError("Error de red al generar el enlace de descarga.");
+    }
   };
 
   const handlePrint = () => {
@@ -619,15 +640,7 @@ export default function AdminDashboardPage() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" strokeOpacity={0.2} />
                 <XAxis dataKey="anio" stroke="#64748b" fontSize={12} />
                 <YAxis stroke="#64748b" fontSize={12} allowDecimals={false} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#0f172a",
-                    border: "none",
-                    borderRadius: "8px",
-                    color: "#fff",
-                    fontSize: "12px",
-                  }}
-                />
+                <Tooltip {...estilosTooltip(oscuro)} />
                 <Legend />
                 {vista === "TITULADOS" ? (
                   <Bar dataKey="titulados" name="Titulados" fill="#1e3a8a" radius={[4, 4, 0, 0]} />
@@ -647,58 +660,17 @@ export default function AdminDashboardPage() {
               Distribución por Sector Laboral ({vista === "TITULADOS" ? "Titulados" : "Egresados"})
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Público, Privado, Académico, ONG e Independiente
+              {SUBTITULO_SECTOR}
             </p>
           </div>
-          <div className="h-64 w-full flex items-center justify-center">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={
-                    vista === "TITULADOS"
-                      ? data?.seriesSectorTitulados || []
-                      : data?.seriesSectorEgresados || []
-                  }
-                  dataKey="valor"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={85}
-                  paddingAngle={3}
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                  labelLine={false}
-                  onMouseEnter={(_: unknown, i: number) => setSectorHover(i)}
-                  onMouseLeave={() => setSectorHover(null)}
-                  style={{ cursor: "pointer", outline: "none" }}
-                >
-                  {(vista === "TITULADOS"
-                    ? data?.seriesSectorTitulados || []
-                    : data?.seriesSectorEgresados || []
-                  ).map((entry, index) => (
-                    <Cell
-                      key={`cell-${index}`}
-                      fill={COLORS_LIGHT[index % COLORS_LIGHT.length]}
-                      fillOpacity={sectorHover === null || sectorHover === index ? 1 : 0.25}
-                      stroke={sectorHover === index ? "#0f172a" : "transparent"}
-                      strokeWidth={sectorHover === index ? 2 : 0}
-                      style={{ cursor: "pointer", outline: "none" }}
-                      className="transition-opacity duration-200"
-                    />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#0f172a",
-                    border: "none",
-                    borderRadius: "8px",
-                    color: "#fff",
-                    fontSize: "12px",
-                  }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
+          <GraficoSector
+            series={
+              vista === "TITULADOS"
+                ? data?.seriesSectorTitulados || []
+                : data?.seriesSectorEgresados || []
+            }
+            etiqueta={vista === "TITULADOS" ? "Titulados" : "Egresados"}
+          />
         </div>
       </div>
 
@@ -706,117 +678,139 @@ export default function AdminDashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Distribución Geográfica */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm transition-colors hover:shadow-md hover:border-slate-300 dark:hover:border-slate-600">
-          <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-1">
-            <MapPin className="w-5 h-5 text-red-700 dark:text-red-400" />
-            Distribución Geográfica ({vista === "TITULADOS" ? "Titulados" : "Egresados"})
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-            Ubicación laboral (ciudad, departamento o exterior)
-          </p>
+          {/* El título va como grupo de encabezado: al partirse la lista entre hojas, el
+              motor de impresión lo vuelve a dibujar arriba. */}
+          <div className="tabla-impresion">
+            <div className="tabla-impresion-titulo">
+              <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-1">
+                <MapPin className="w-5 h-5 text-red-700 dark:text-red-400" />
+                Distribución Geográfica ({vista === "TITULADOS" ? "Titulados" : "Egresados"})
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                Ubicación laboral (ciudad, departamento o exterior)
+              </p>
+            </div>
 
-          <div className="space-y-3 max-h-60 overflow-y-auto pr-2">
-            {(vista === "TITULADOS"
-              ? data?.seriesGeoTitulados || []
-              : data?.seriesGeoEgresados || []
-            ).map((geo, index) => {
-              const totalItems =
-                (vista === "TITULADOS"
-                  ? data?.kpisTitulados.totalTitulados
-                  : data?.kpisEgresados.totalEgresados) || 1;
-              const porcentaje = ((geo.total / totalItems) * 100).toFixed(1);
+            <div className="tabla-impresion-cuerpo">
+              <div className="space-y-3 max-h-60 overflow-y-auto pr-2">
+                {(vista === "TITULADOS"
+                  ? data?.seriesGeoTitulados || []
+                  : data?.seriesGeoEgresados || []
+                ).map((geo, index) => {
+                  const totalItems =
+                    (vista === "TITULADOS"
+                      ? data?.kpisTitulados.totalTitulados
+                      : data?.kpisEgresados.totalEgresados) || 1;
+                  const porcentaje = ((geo.total / totalItems) * 100).toFixed(1);
 
-              return (
-                <div key={index} className="flex items-center justify-between text-xs sm:text-sm">
-                  <div className="flex items-center gap-2 font-medium text-slate-700 dark:text-slate-300">
-                    <span className="w-2 h-2 rounded-full bg-blue-700 dark:bg-blue-400"></span>
-                    {geo.ciudad}
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="w-24 sm:w-32 bg-slate-100 dark:bg-slate-800 rounded-full h-2 overflow-hidden hidden sm:block">
-                      <div
-                        className="bg-blue-800 dark:bg-blue-500 h-full rounded-full"
-                        style={{ width: `${porcentaje}%` }}
-                      ></div>
+                  return (
+                    <div key={index} className="flex items-center justify-between text-xs sm:text-sm">
+                      <div className="flex items-center gap-2 font-medium text-slate-700 dark:text-slate-300">
+                        <span className="w-2 h-2 rounded-full bg-blue-700 dark:bg-blue-400"></span>
+                        {geo.ciudad}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="w-24 sm:w-32 bg-slate-100 dark:bg-slate-800 rounded-full h-2 overflow-hidden hidden sm:block">
+                          <div
+                            className="bg-blue-800 dark:bg-blue-500 h-full rounded-full"
+                            style={{ width: `${porcentaje}%` }}
+                          ></div>
+                        </div>
+                        <span className="font-bold text-slate-900 dark:text-white w-14 text-right">
+                          {geo.total} ({porcentaje}%)
+                        </span>
+                      </div>
                     </div>
-                    <span className="font-bold text-slate-900 dark:text-white w-14 text-right">
-                      {geo.total} ({porcentaje}%)
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
 
         {/* Modalidades / Motivos */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm transition-colors hover:shadow-md hover:border-slate-300 dark:hover:border-slate-600">
-          {vista === "TITULADOS" ? (
-            <>
-              <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-1">
-                <Layers className="w-5 h-5 text-indigo-800 dark:text-indigo-400" />
-                Modalidades de Titulación
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-                Tesis, Proyecto de Grado, Examen de Grado, Trabajo Dirigido
-              </p>
-              <div className="space-y-2.5">
-                {data?.seriesModalidades.map((mod, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800"
-                  >
-                    <span className="text-xs sm:text-sm font-semibold text-slate-800 dark:text-slate-200">
-                      {mod.modalidad}
-                    </span>
-                    <span className="text-xs font-extrabold px-2.5 py-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-blue-900 dark:text-blue-400 shadow-2xs">
-                      {mod.total} titulados
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : (
-            <>
-              <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-1">
-                <Clock className="w-5 h-5 text-amber-700 dark:text-amber-400" />
-                Motivos de No Titulación (Egresados)
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-                Factores laborales, económicos, personales o en proceso
-              </p>
-              <div className="space-y-2.5">
-                {data?.seriesMotivosNoTitulacion.map((mot, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center justify-between p-2.5 rounded-xl bg-amber-50/50 dark:bg-amber-950/30 border border-amber-100 dark:border-amber-900/40"
-                  >
-                    <span className="text-xs sm:text-sm font-semibold text-amber-950 dark:text-amber-200">
-                      {mot.motivo}
-                    </span>
-                    <span className="text-xs font-extrabold px-2.5 py-1 bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 rounded-lg text-amber-900 dark:text-amber-400 shadow-2xs">
-                      {mot.total} egresados
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
+          {/* El título se declara como grupo de encabezado dentro de una tabla de impresión:
+              si la lista salta de hoja, el motor vuelve a dibujar el título arriba. */}
+          <div className="tabla-impresion">
+            {vista === "TITULADOS" ? (
+              <>
+                <div className="tabla-impresion-titulo">
+                  <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-1">
+                    <Layers className="w-5 h-5 text-indigo-800 dark:text-indigo-400" />
+                    Modalidades de Titulación
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                    Tesis, Proyecto de Grado, Examen de Grado, Trabajo Dirigido
+                  </p>
+                </div>
+                <div className="tabla-impresion-cuerpo space-y-2.5">
+                  {data?.seriesModalidades.map((mod, index) => (
+                    <div
+                      key={index}
+                      className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800"
+                    >
+                      <span className="text-xs sm:text-sm font-semibold text-slate-800 dark:text-slate-200">
+                        {mod.modalidad}
+                      </span>
+                      <span className="text-xs font-extrabold px-2.5 py-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-blue-900 dark:text-blue-400 shadow-2xs">
+                        {mod.total} titulados
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="tabla-impresion-titulo">
+                  <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-1">
+                    <Clock className="w-5 h-5 text-amber-700 dark:text-amber-400" />
+                    Motivos de No Titulación (Egresados)
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                    Factores laborales, económicos, personales o en proceso
+                  </p>
+                </div>
+                <div className="tabla-impresion-cuerpo space-y-2.5">
+                  {data?.seriesMotivosNoTitulacion.map((mot, index) => (
+                    <div
+                      key={index}
+                      className="flex items-center justify-between p-2.5 rounded-xl bg-amber-50/50 dark:bg-amber-950/30 border border-amber-100 dark:border-amber-900/40"
+                    >
+                      <span className="text-xs sm:text-sm font-semibold text-amber-950 dark:text-amber-200">
+                        {mot.motivo}
+                      </span>
+                      <span className="text-xs font-extrabold px-2.5 py-1 bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 rounded-lg text-amber-900 dark:text-amber-400 shadow-2xs">
+                        {mot.total} egresados
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
       {/* TABLA COMPARATIVA DE COHORTES */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm overflow-hidden transition-colors">
-        <div className="mb-4">
-          <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <Users className="w-5 h-5 text-blue-900 dark:text-blue-400" />
-            Tabla Comparativa de Cohortes (Titulados vs. Egresados)
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Relación por cohorte de ingreso (Kardex) y porcentaje de titulación
-          </p>
-        </div>
+        {/* Con el título como grupo de encabezado, al continuar la tabla en otra hoja se
+            repite tanto el encabezado de columnas (lo hace el <thead>) como el nombre de la
+            tabla, que antes se quedaba solo en la primera. */}
+        <div className="tabla-impresion">
+          <div className="tabla-impresion-titulo">
+            <div className="mb-4">
+              <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Users className="w-5 h-5 text-blue-900 dark:text-blue-400" />
+                Tabla Comparativa de Cohortes (Titulados vs. Egresados)
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Relación por cohorte de ingreso (Kardex) y porcentaje de titulación
+              </p>
+            </div>
+          </div>
 
-        <div className="overflow-x-auto">
+          <div className="tabla-impresion-cuerpo overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs sm:text-sm">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider">
@@ -855,6 +849,7 @@ export default function AdminDashboardPage() {
               })}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
 
@@ -864,6 +859,21 @@ export default function AdminDashboardPage() {
         2026
       </footer>
 
+      {/* Error al generar el enlace temporal. Se muestra fuera del modal para que el
+          mensaje no desaparezca al cerrarlo, y explica qué hacer (reintentar). */}
+      {exportError && (
+        <div className="no-print fixed bottom-6 right-6 z-50 max-w-sm rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900 shadow-lg">
+          <b className="block font-bold">No se pudo descargar</b>
+          {exportError}
+          <button
+            onClick={() => setExportError(null)}
+            className="mt-2 text-xs font-bold underline"
+          >
+            Cerrar
+          </button>
+        </div>
+      )}
+
       {/* Modal de confirmación de exportación */}
       <ExportModal
         isOpen={exportModal.open}
@@ -872,6 +882,8 @@ export default function AdminDashboardPage() {
         title={vista === "TITULADOS" ? "titulados" : "egresados"}
         formato={exportModal.formato}
         params={exportModal.params}
+        // Nota de seguridad: el enlace que se genera es temporal y caduca en minutos.
+        aviso="La descarga se realiza mediante un enlace seguro que caduca en 5 minutos y solo puede usarse desde esta sesión."
       />
     </div>
   );

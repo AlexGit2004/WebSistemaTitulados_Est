@@ -18,7 +18,7 @@ import { DURACION_SESION_MS, NOMBRE_COOKIE, leerSesionDeRequest } from "@/lib/se
  * `lib/guards.ts`, que sí corre en Node.
  */
 
-const ROLES = ["admin", "TITULADO", "EGRESADO"] as const;
+const ROLES = ["admin", "TITULADO", "EGRESADO", "KARDEX"] as const;
 type Rol = (typeof ROLES)[number];
 
 const esRol = (valor: string): valor is Rol => (ROLES as readonly string[]).includes(valor);
@@ -38,6 +38,7 @@ const RUTAS_POR_ROL: Array<{ prefijo: string; roles: Rol[] }> = [
   { prefijo: "/admin", roles: ["admin"] },
   { prefijo: "/portal/titulado", roles: ["TITULADO", "admin"] },
   { prefijo: "/portal/egresado", roles: ["EGRESADO", "admin"] },
+  { prefijo: "/kardex", roles: ["KARDEX"] },
 ];
 
 /**
@@ -53,7 +54,11 @@ const APIS_SOLO_ADMIN = [
   "/api/exportar",
   "/api/importar",
   "/api/auditoria",
+  "/api/respaldar",
 ];
+
+const APIS_SOLO_KARDEX = ["/api/kardex"];
+const APIS_REQUIEREN_SESION = ["/api/carreras", "/api/solicitudes"];
 
 /**
  * Excepción a `/api/personas` para el portal de titulados y egresados.
@@ -82,7 +87,15 @@ function esApiPersonasDePropioTitular(ruta: string, req: NextRequest, sesion: { 
 }
 
 /** APIs accesibles por cualquier usuario con sesión (admin o titular). */
-const APIS_CON_SESION = ["/api/noticias"];
+/**
+ * APIs accesibles por cualquier usuario con sesión (admin o titular).
+ *
+ * `/api/mis-datos` va aquí porque implementa los derechos de acceso, portabilidad y
+ * supresión: tienen que poder ejercerlos los TITULARES, no solo el administrador. La
+ * ruta se autoexige además (`exigirAdmin` más la comparación de CI en
+ * `lib/guards.ts`), porque "con sesión" no debe significar "sobre cualquier ficha".
+ */
+const APIS_CON_SESION = ["/api/noticias", "/api/mis-datos"];
 
 export async function middleware(req: NextRequest) {
   const ruta = req.nextUrl.pathname;
@@ -90,9 +103,21 @@ export async function middleware(req: NextRequest) {
 
   const regla = RUTAS_POR_ROL.find((r) => ruta === r.prefijo || ruta.startsWith(`${r.prefijo}/`));
   const soloAdmin = APIS_SOLO_ADMIN.some((p) => ruta === p || ruta.startsWith(`${p}/`));
+  const soloKardex = APIS_SOLO_KARDEX.some((p) => ruta === p || ruta.startsWith(`${p}/`));
+  const requiereSesion = APIS_REQUIEREN_SESION.some((p) => ruta === p || ruta.startsWith(`${p}/`));
   const conSesion = APIS_CON_SESION.some((p) => ruta === p || ruta.startsWith(`${p}/`));
 
-  if (!regla && !soloAdmin && !conSesion) return NextResponse.next();
+  // `/api/noticias` se lee sin sesión (es contenido público), pero `/api/mis-datos`
+  // NO: son datos personales de un titular, y su lectura exige estar autenticado como
+  // esa persona. Sin esta separación, la rama de "lectura pública" de abajo dejaría
+  // pasar un GET a los datos de cualquier egresado sin cookie ninguna.
+  const soloLecturaPublica = (p: string) => ruta === p || ruta.startsWith(`${p}/`);
+  const lecturaPublica =
+    soloLecturaPublica("/api/noticias") &&
+    req.method === "GET" &&
+    req.nextUrl.searchParams.get("admin") !== "1";
+
+  if (!regla && !soloAdmin && !soloKardex && !requiereSesion && (!conSesion || lecturaPublica)) return NextResponse.next();
 
   const token = req.cookies.get(NOMBRE_COOKIE)?.value;
   const sesion = await leerSesionDeRequest(req);
@@ -126,6 +151,10 @@ export async function middleware(req: NextRequest) {
   // El titular accediendo a SU propia ficha no es "solo admin": el portal lo necesita.
   const esPropiaFicha = esApiPersonasDePropioTitular(ruta, req, sesion);
 
+  if (soloKardex && rol !== "KARDEX") {
+    return NextResponse.json({ error: "Requiere permisos de Kardex" }, { status: 403 });
+  }
+
   if (soloAdmin && rol !== "admin" && !esPropiaFicha) {
     return esApi
       ? NextResponse.json({ error: "Requiere permisos de administrador" }, { status: 403 })
@@ -134,7 +163,7 @@ export async function middleware(req: NextRequest) {
 
   if (regla && (!rol || !regla.roles.includes(rol))) {
     // Con sesión pero del rol equivocado: a su portal, no a /login.
-    const destino = rol === "admin" ? "/admin/dashboard" : `/portal/${rol!.toLowerCase()}`;
+    const destino = rol === "admin" ? "/admin/dashboard" : rol === "KARDEX" ? "/kardex/solicitudes" : `/portal/${rol!.toLowerCase()}`;
     const url = req.nextUrl.clone();
     url.pathname = destino;
     url.search = "";
@@ -179,6 +208,12 @@ export const config = {
     "/api/exportar/:path*",
     "/api/importar/:path*",
     "/api/auditoria/:path*",
+  "/api/respaldar/:path*",
     "/api/noticias/:path*",
+    "/api/mis-datos/:path*",
+    "/kardex/:path*",
+    "/api/kardex/:path*",
+    "/api/carreras/:path*",
+    "/api/solicitudes/:path*",
   ],
 };

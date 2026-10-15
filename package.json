@@ -4,6 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:docker": "sh -c 'export DATABASE_URL=$(node scripts/db-url.mjs 2>/dev/null); next dev'",
+    "db:migrate:docker": "sh -c 'export DATABASE_URL=$(node scripts/db-url.mjs 2>/dev/null); drizzle-kit migrate'",
+    "seed:docker": "sh -c 'export DATABASE_URL=$(node scripts/db-url.mjs 2>/dev/null); tsx scripts/seed.ts'",
+    "seed:masivo:docker": "sh -c 'export DATABASE_URL=$(node scripts/db-url.mjs 2>/dev/null); tsx scripts/seed_masivo.ts'",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
